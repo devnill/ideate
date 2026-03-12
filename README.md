@@ -445,7 +445,18 @@ If you have an existing ideate artifact directory using the old `reviews/` struc
 - Delete the original `reviews/` directory — verify the migration first, then delete manually
 - Modify any existing files — it only copies and creates
 
-**After migration**:
+### If you are running inside an active Claude Code session
+
+`claude -p` cannot run inside an active Claude Code session (nested sessions share runtime resources and will crash). The script detects this and skips step 3 automatically, printing a warning.
+
+In that case, run the domain bootstrap manually after the script completes. In your Claude Code session, send this prompt:
+
+> Bootstrap the domains layer for `path/to/artifact-dir` using the domain-curator agent.
+
+Claude Code will spawn the domain-curator agent directly, reading your archive content and writing the `domains/` structure. Wait for it to finish before proceeding.
+
+### After migration
+
 1. Review `domains/` to verify the bootstrap looks correct
 2. Delete `reviews/` if satisfied
 3. Move `steering/interview.md` to `steering/interviews/legacy.md` (optional, preserves history; future refine sessions use per-domain interview files)

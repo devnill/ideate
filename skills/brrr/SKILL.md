@@ -311,14 +311,14 @@ When an Andon event occurs (scope-changing finding, merge conflict, spec ambigui
 ## [brrr] {date} — Proxy-human decision (Cycle {N})
 Event: {one-sentence summary of the Andon event}
 Decision: {proxy-human's decision}
-Confidence: {high | medium | low}
+Confidence: {HIGH | MEDIUM | LOW}
 ```
 
-5. Apply the decision. If the decision is `DEFERRED` (genuine external dependency or conflicting principles), add it to the cycle's deferred items list and continue with other work items where possible.
+5. Apply the decision. If the decision is `DEFER` (genuine external dependency or conflicting principles), add it to the cycle's deferred items list and continue with other work items where possible.
 
 6. Continue execution. Do not surface this event to the user.
 
-**If the Agent tool is not available**: Handle the event using the same decision process yourself — read `guiding-principles.md` and `constraints.md`, apply them to the event, make the best decision derivable from existing artifacts, and record it in `proxy-human-log.md` with `[brrr-fallback]` notation.
+**If the Agent tool is not available**: Handle the event using the same decision process yourself — read `guiding-principles.md` and `constraints.md`, apply them to the event, make the best decision derivable from existing artifacts, and record it in `proxy-human-log.md` using this heading format: `## [brrr-fallback] {ISO date} — Cycle {cycle_number}` followed by the same Event/Decision/Confidence/Rationale fields.
 
 ### Worker Agent Failure
 
@@ -490,17 +490,23 @@ Minor findings do not block convergence.
 
 Spawn a `principles-checker` (spec-reviewer agent) with a narrow, focused prompt:
 
+Spawn the `spec-reviewer` agent using the Agent tool:
+
 ```
-spawn_session(
-  prompt="Read {artifact_dir}/steering/guiding-principles.md and the project source code at {project_source_root}. For each principle, state whether it is satisfied or violated. Return ONLY violations. If none, return exactly: No violations found.\n\nDo not write to a file. Return your response inline.",
-  working_dir={project_source_root},
-  role="spec-reviewer",
-  model="claude-sonnet-4-6",
-  timeout=300
-)
+Agent tool:
+  subagent_type: "spec-reviewer"
+  model: "sonnet"
+  prompt: "Read {artifact_dir}/steering/guiding-principles.md and the project
+    source code at {project_source_root}. For each principle, state whether it
+    is satisfied or violated. Return ONLY violations. If none, return exactly:
+    No violations found. Do not write to a file. Return your response inline."
 ```
 
-Convergence passes Condition B if and only if the spec-reviewer's inline response contains `No violations found.` (case-insensitive, ignoring surrounding whitespace).
+Wait for the agent to return its response inline.
+
+If the Agent tool is not available but `spawn_session` is configured (via outpost), fall back to spawn_session with the same prompt.
+
+Convergence passes Condition B if and only if the response contains `No violations found.` (case-insensitive, ignoring surrounding whitespace). If neither Agent tool nor spawn_session is available, Condition B cannot be evaluated — treat the cycle as not converged and log: "Condition B skipped: no agent-spawning mechanism available."
 
 ### Convergence Decision
 

@@ -105,7 +105,7 @@ After appending to `proxy-human-log.md`, return a response with:
 1. **Decision**: State the decision (or deferral) clearly in one sentence.
 2. **Rationale**: Two to four sentences explaining the reasoning.
 3. **Principles Cited**: List any guiding principles or constraints that governed the decision.
-4. **Confidence**: `high`, `medium`, or `low`.
+4. **Confidence**: `HIGH`, `MEDIUM`, or `LOW`.
 5. **Log Entry Written**: Confirm the entry was appended to `{artifact_dir}/proxy-human-log.md`.
 
 ---
