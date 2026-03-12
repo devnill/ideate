@@ -135,7 +135,7 @@ During the interview, spawn `researcher` agents in the background when topics ar
 
 **How to spawn:**
 
-Use the `spawn_session` tool (if available via the session-spawner MCP server) or spawn a subagent with the researcher agent prompt. Provide:
+Use the Agent tool to spawn a subagent with the researcher agent prompt, or use `spawn_session` if outpost is configured. Provide:
 
 - The specific topic to investigate
 - Specific questions to answer

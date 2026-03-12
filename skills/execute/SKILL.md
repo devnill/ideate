@@ -247,9 +247,9 @@ Use Claude Code agent teams with a shared task list. This mode requires `CLAUDE_
 
 ## Recursive Execution
 
-For large projects where the plan includes sub-plans or where module-level execution is specified, use the `spawn_session` tool from the session-spawner MCP server (if configured) to invoke sub-sessions. Each sub-session runs `/ideate:execute` for its designated scope.
+For large projects where the plan includes sub-plans or where module-level execution is specified, use the Agent tool to invoke sub-sessions. Each sub-session runs `/ideate:execute` for its designated scope.
 
-If the session-spawner MCP server is not available, execute all items in the main session using the standard modes above. Note in the journal that recursive execution was not available.
+If the Agent tool is not available but the session-spawner MCP server (from outpost) is configured, fall back to `spawn_session`. If neither is available, execute all items in the main session using the standard modes above and note in the journal that recursive execution was not available.
 
 ---
 
