@@ -176,12 +176,12 @@ Execute according to the mode specified in the execution strategy.
 
 ## Context for Every Worker
 
-**MCP availability check**: If the MCP tool `ideate_get_work_item_context` is available:
-1. Call `ideate_get_work_item_context({artifact_dir}, {work_item_id})` — returns pre-assembled context including work item spec, module spec, domain policies, and research.
+**MCP availability check**: Look in your tool list for a tool whose name ends in `ideate_get_work_item_context` (it will be prefixed, e.g. `mcp__ideate_artifact_server__ideate_get_work_item_context` or `mcp__plugin_ideate_ideate_artifact_server__ideate_get_work_item_context`). If found:
+1. Call it with `({artifact_dir}, {work_item_id})` — returns pre-assembled context including work item spec, module spec, domain policies, and research.
 2. Also provide the project source root path and relevant domain policies (if not already included).
 3. Skip the manual file reads in steps 1–8 below.
 
-If not available, read files manually:
+If not found, read files manually:
 
 Regardless of execution mode, every worker (subagent, teammate, or the main session in sequential mode) receives:
 
