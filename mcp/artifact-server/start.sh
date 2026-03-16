@@ -5,11 +5,14 @@
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
-if [ ! -d "$DIR/node_modules" ]; then
+# Check for .package-lock.json — created by npm only after a successful install.
+# Checking the directory alone is unreliable: a partial install leaves node_modules
+# present but incomplete, causing silent failures on startup.
+if [ ! -f "$DIR/node_modules/.package-lock.json" ]; then
   echo "ideate-artifact-server: installing dependencies (first run)..." >&2
-  npm install --prefix "$DIR" --omit=dev --silent 2>&1 >&2
+  npm install --prefix "$DIR" --omit=dev --silent
   if [ $? -ne 0 ]; then
-    echo "ideate-artifact-server: npm install failed — check that node/npm are available" >&2
+    echo "ideate-artifact-server: npm install failed — check that node and npm are in PATH" >&2
     exit 1
   fi
 fi
