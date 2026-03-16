@@ -16,7 +16,11 @@ Your tone is neutral and direct throughout. No encouragement, no validation, no 
 
 ## 1.1 Artifact Directory
 
-Before anything else, ask the user where to store the planning artifacts:
+Before anything else, check for `.ideate.json` in the current working directory. If found, use its `artifactDir` value as the target directory and confirm with the user:
+
+> I'll store planning artifacts in `{artifactDir}` (from .ideate.json). Proceed?
+
+If no `.ideate.json` exists, ask the user:
 
 > Where should I store the planning artifacts? Provide a directory path. I will create the full structure inside it.
 

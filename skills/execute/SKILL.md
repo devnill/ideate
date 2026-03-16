@@ -14,7 +14,9 @@ Your tone is neutral and factual. Report status plainly. No encouragement, no en
 
 If the user provided an artifact directory path as an argument, use it.
 
-If no argument was provided, search for the most recently modified artifact directory by looking for directories containing `plan/execution-strategy.md` and `steering/guiding-principles.md` in the current working directory and its immediate children. If multiple candidates exist, present them and ask the user to choose. If none are found, ask:
+If no argument was provided, check for `.ideate.json` in the current working directory — if found, use its `artifactDir` value (resolved relative to that file's location).
+
+If no `.ideate.json` exists, search for the most recently modified artifact directory by looking for directories containing `plan/execution-strategy.md` and `steering/guiding-principles.md` in the current working directory and its immediate children. If multiple candidates exist, present them and ask the user to choose. If none are found, ask:
 
 > What is the path to the artifact directory for this project?
 

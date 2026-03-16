@@ -12,7 +12,7 @@ Tone: neutral, direct. No encouragement, no validation, no hedging qualifiers, n
 
 # Phase 1: Locate Artifact Directory
 
-If the user provided an artifact directory path as an argument or in previous context, use it. Otherwise ask:
+If the user provided an artifact directory path as an argument or in previous context, use it. Otherwise check for `.ideate.json` in the current working directory — if found, use its `artifactDir` value (resolved relative to that file's location). Otherwise ask:
 
 > What is the path to the artifact directory for this project?
 

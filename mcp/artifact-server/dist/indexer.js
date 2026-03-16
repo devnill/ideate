@@ -416,7 +416,8 @@ export async function getContextPackage(artifactDir, reviewScope, changedFiles) 
     // Section 4: Source Code Index
     // Determine source dir from architecture.md or fall back to parent of artifactDir
     const sourceDir = await detectSourceDir(artifactDir);
-    const srcIndexContent = await buildSourceCodeIndex(cacheKey, sourceDir, totalLines > 700 ? 3 : 5 // stricter if already large
+    const srcIndexContent = await buildSourceCodeIndex(cacheKey, sourceDir, totalLines > 700 ? 3 : 5, // stricter exports per file if already large
+    totalLines > 700 ? 75 : 150 // stricter row cap if already large
     );
     sections.push("", "## Source Code Index", "", srcIndexContent);
     totalLines += srcIndexContent.split("\n").length + 3;
@@ -483,7 +484,7 @@ async function detectSourceDir(artifactDir) {
     }
     return parent;
 }
-async function buildSourceCodeIndex(cacheKey, sourceDir, maxExportsPerFile) {
+export async function buildSourceCodeIndex(cacheKey, sourceDir, maxExportsPerFile, maxRows = 150) {
     const allFiles = await globDir(sourceDir);
     const sourceFiles = allFiles.filter(isSourceFile);
     if (sourceFiles.length === 0) {
@@ -494,6 +495,10 @@ async function buildSourceCodeIndex(cacheKey, sourceDir, maxExportsPerFile) {
         "|---|---|---|",
     ];
     for (const filePath of sourceFiles.sort()) {
+        if (rows.length - 2 >= maxRows) {
+            rows.push(`| … | … | [${sourceFiles.length - maxRows} more files omitted — use ideate_source_index for full listing] |`);
+            break;
+        }
         const lang = detectLanguage(filePath);
         registerDependency(cacheKey, filePath);
         const content = (await readFileSafe(filePath)) ?? "";
