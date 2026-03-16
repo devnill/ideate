@@ -43,6 +43,7 @@ import {
   artifactIndex,
   domainPolicies,
   artifactQuery,
+  buildSourceCodeIndex,
 } from "../indexer.js";
 
 // -----------------------------------------------------------------------
@@ -167,6 +168,49 @@ describe("indexer tool functions", () => {
       } finally {
         fs.rmSync(emptyDir, { recursive: true, force: true });
       }
+    });
+  });
+
+  describe("buildSourceCodeIndex", () => {
+    it("truncates output at maxRows and appends an omission note", async () => {
+      // Create 10 TypeScript files each with a distinct export
+      for (let i = 0; i < 10; i++) {
+        writeFixture(
+          `src/module${i}.ts`,
+          `export function func${i}() {}\n`
+        );
+      }
+
+      const result = await buildSourceCodeIndex(
+        `test-cachekey-${tmpDir}`,
+        path.join(tmpDir, "src"),
+        5,
+        3 // cap at 3 rows
+      );
+
+      const lines = result.split("\n");
+      // 2 header rows + 3 data rows + 1 omission row = 6 lines
+      expect(lines).toHaveLength(6);
+      expect(lines[lines.length - 1]).toContain("more files omitted");
+      expect(lines[lines.length - 1]).toContain("ideate_source_index");
+    });
+
+    it("returns all rows when file count is under maxRows", async () => {
+      for (let i = 0; i < 3; i++) {
+        writeFixture(`src/small${i}.ts`, `export function fn${i}() {}\n`);
+      }
+
+      const result = await buildSourceCodeIndex(
+        `test-cachekey-small-${tmpDir}`,
+        path.join(tmpDir, "src"),
+        5,
+        10 // cap well above file count
+      );
+
+      const lines = result.split("\n").filter((l) => l.startsWith("|"));
+      // 1 header + 1 separator + 3 data rows
+      expect(lines).toHaveLength(5);
+      expect(result).not.toContain("more files omitted");
     });
   });
 

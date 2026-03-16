@@ -7,10 +7,5 @@
   },
   "license": "MIT",
   "keywords": ["planning", "development", "review", "workflow", "agents", "sdlc", "spec-driven"],
-  "mcpServers": {
-    "ideate-artifact-server": {
-      "command": "node",
-      "args": ["${pluginPath}/mcp/artifact-server/dist/index.js"]
-    }
-  }
+  "mcpServers": "./.mcp.json"
 }

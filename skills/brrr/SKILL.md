@@ -14,7 +14,7 @@ Your tone is neutral and factual. Report status plainly. No encouragement, no en
 
 # Phase 1: Parse Invocation Arguments
 
-1. **Artifact directory path** — positional argument. If not provided, search for it (same logic as Phase 2). If multiple candidates are found, ask the user to choose. If none, ask: "What is the path to the artifact directory for this project?"
+1. **Artifact directory path** — positional argument. If not provided, check for `.ideate.json` in the current working directory — if found, use its `artifactDir` value (resolved relative to that file's location). Otherwise, search for it (same logic as Phase 2). If multiple candidates are found, ask the user to choose. If none, ask: "What is the path to the artifact directory for this project?"
 2. **`--max-cycles N`** — optional integer. Default: 20.
 
 Store both values. All subsequent phases reference these.

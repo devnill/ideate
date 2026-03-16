@@ -485,7 +485,8 @@ export async function getContextPackage(
   const srcIndexContent = await buildSourceCodeIndex(
     cacheKey,
     sourceDir,
-    totalLines > 700 ? 3 : 5 // stricter if already large
+    totalLines > 700 ? 3 : 5,  // stricter exports per file if already large
+    totalLines > 700 ? 75 : 150 // stricter row cap if already large
   );
   sections.push("", "## Source Code Index", "", srcIndexContent);
   totalLines += srcIndexContent.split("\n").length + 3;
@@ -557,10 +558,11 @@ async function detectSourceDir(artifactDir: string): Promise<string> {
   return parent;
 }
 
-async function buildSourceCodeIndex(
+export async function buildSourceCodeIndex(
   cacheKey: string,
   sourceDir: string,
-  maxExportsPerFile: number
+  maxExportsPerFile: number,
+  maxRows = 150
 ): Promise<string> {
   const allFiles = await globDir(sourceDir);
   const sourceFiles = allFiles.filter(isSourceFile);
@@ -575,6 +577,10 @@ async function buildSourceCodeIndex(
   ];
 
   for (const filePath of sourceFiles.sort()) {
+    if (rows.length - 2 >= maxRows) {
+      rows.push(`| … | … | [${sourceFiles.length - maxRows} more files omitted — use ideate_source_index for full listing] |`);
+      break;
+    }
     const lang = detectLanguage(filePath)!;
     registerDependency(cacheKey, filePath);
     const content = (await readFileSafe(filePath)) ?? "";

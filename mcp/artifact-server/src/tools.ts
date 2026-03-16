@@ -8,6 +8,7 @@ import {
   getWorkItemContext,
   sourceIndex,
 } from "./indexer.js";
+import { resolveArtifactDir } from "./config.js";
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -24,7 +25,7 @@ export const TOOLS: Tool[] = [
         artifact_dir: {
           type: "string",
           description:
-            "Absolute path to the ideate artifact directory (the directory containing plan/, steering/, domains/, etc.).",
+            "Absolute path to the ideate artifact directory (the directory containing plan/, steering/, domains/, etc.). Optional if a .ideate.json file exists in the project directory.",
         },
         work_item_id: {
           type: "string",
@@ -32,7 +33,7 @@ export const TOOLS: Tool[] = [
             "Work item identifier. Can be a numeric prefix (e.g. '082'), a slug (e.g. 'mcp-artifact-server'), or a full filename prefix (e.g. '082-mcp-artifact-server'). If work-items.yaml exists the id field is matched; otherwise the filename prefix is matched.",
         },
       },
-      required: ["artifact_dir", "work_item_id"],
+      required: ["work_item_id"],
     },
   },
   {
@@ -45,7 +46,7 @@ export const TOOLS: Tool[] = [
         artifact_dir: {
           type: "string",
           description:
-            "Absolute path to the ideate artifact directory.",
+            "Absolute path to the ideate artifact directory. Optional if a .ideate.json file exists in the project directory.",
         },
         review_scope: {
           type: "string",
@@ -60,7 +61,7 @@ export const TOOLS: Tool[] = [
             "Optional. For differential scope: list of changed file paths to focus the source index on.",
         },
       },
-      required: ["artifact_dir"],
+      required: [],
     },
   },
   {
@@ -73,7 +74,7 @@ export const TOOLS: Tool[] = [
         artifact_dir: {
           type: "string",
           description:
-            "Absolute path to the ideate artifact directory.",
+            "Absolute path to the ideate artifact directory. Optional if a .ideate.json file exists in the project directory.",
         },
         query: {
           type: "string",
@@ -81,7 +82,7 @@ export const TOOLS: Tool[] = [
             "Search query — space-separated keywords. Ranked by term frequency across artifact chunks.",
         },
       },
-      required: ["artifact_dir", "query"],
+      required: ["query"],
     },
   },
   {
@@ -94,10 +95,10 @@ export const TOOLS: Tool[] = [
         artifact_dir: {
           type: "string",
           description:
-            "Absolute path to the ideate artifact directory.",
+            "Absolute path to the ideate artifact directory. Optional if a .ideate.json file exists in the project directory.",
         },
       },
-      required: ["artifact_dir"],
+      required: [],
     },
   },
   {
@@ -110,7 +111,7 @@ export const TOOLS: Tool[] = [
         artifact_dir: {
           type: "string",
           description:
-            "Absolute path to the ideate artifact directory.",
+            "Absolute path to the ideate artifact directory. Optional if a .ideate.json file exists in the project directory.",
         },
         domain: {
           type: "string",
@@ -118,7 +119,7 @@ export const TOOLS: Tool[] = [
             "Optional. Name of a specific domain (e.g. 'workflow', 'artifact-structure'). If omitted, returns policies from all domains.",
         },
       },
-      required: ["artifact_dir"],
+      required: [],
     },
   },
   {
@@ -131,7 +132,7 @@ export const TOOLS: Tool[] = [
         artifact_dir: {
           type: "string",
           description:
-            "Absolute path to the ideate artifact directory (the directory containing plan/, steering/, domains/, etc.).",
+            "Absolute path to the ideate artifact directory (the directory containing plan/, steering/, domains/, etc.). Optional if a .ideate.json file exists in the project directory.",
         },
         source_dir: {
           type: "string",
@@ -170,7 +171,7 @@ export const TOOLS: Tool[] = [
           },
         },
       },
-      required: ["artifact_dir", "source_dir", "query"],
+      required: ["source_dir", "query"],
     },
   },
   {
@@ -183,7 +184,7 @@ export const TOOLS: Tool[] = [
         artifact_dir: {
           type: "string",
           description:
-            "Absolute path to the ideate artifact directory (used to resolve source dir and for cache keying).",
+            "Absolute path to the ideate artifact directory (used to resolve source dir and for cache keying). Optional if a .ideate.json file exists in the project directory.",
         },
         source_dir: {
           type: "string",
@@ -196,7 +197,7 @@ export const TOOLS: Tool[] = [
             "Optional. Relative path within source_dir to restrict the index to a subtree.",
         },
       },
-      required: ["artifact_dir", "source_dir"],
+      required: ["source_dir"],
     },
   },
 ];
@@ -211,13 +212,13 @@ export async function handleTool(
 ): Promise<string> {
   switch (name) {
     case "ideate_get_work_item_context": {
-      const artifactDir = requireString(args, "artifact_dir");
+      const artifactDir = resolveArtifactDir(args);
       const workItemId = requireString(args, "work_item_id");
       return getWorkItemContext(artifactDir, workItemId);
     }
 
     case "ideate_get_context_package": {
-      const artifactDir = requireString(args, "artifact_dir");
+      const artifactDir = resolveArtifactDir(args);
       const reviewScope = optionalEnum(args, "review_scope", [
         "full",
         "differential",
@@ -227,25 +228,25 @@ export async function handleTool(
     }
 
     case "ideate_artifact_query": {
-      const artifactDir = requireString(args, "artifact_dir");
+      const artifactDir = resolveArtifactDir(args);
       const query = requireString(args, "query");
       return artifactQuery(artifactDir, query);
     }
 
     case "ideate_artifact_index": {
-      const artifactDir = requireString(args, "artifact_dir");
+      const artifactDir = resolveArtifactDir(args);
       return artifactIndex(artifactDir);
     }
 
     case "ideate_domain_policies": {
-      const artifactDir = requireString(args, "artifact_dir");
+      const artifactDir = resolveArtifactDir(args);
       const domain =
         typeof args.domain === "string" ? args.domain : undefined;
       return domainPolicies(artifactDir, domain);
     }
 
     case "ideate_artifact_semantic_search": {
-      const artifactDir = requireString(args, "artifact_dir");
+      const artifactDir = resolveArtifactDir(args);
       const sourceDir = requireString(args, "source_dir");
       const query = requireString(args, "query");
       const topK =
@@ -260,7 +261,7 @@ export async function handleTool(
     }
 
     case "ideate_source_index": {
-      const artifactDir = requireString(args, "artifact_dir");
+      const artifactDir = resolveArtifactDir(args);
       const sourceDir = requireString(args, "source_dir");
       const filterPath =
         typeof args.path === "string" ? args.path : undefined;

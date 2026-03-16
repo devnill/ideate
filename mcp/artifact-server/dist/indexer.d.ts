@@ -16,6 +16,7 @@ export declare function sourceIndex(artifactDir: string, sourceDir: string, filt
  * Follows docs/context-package-spec.md exactly.
  */
 export declare function getContextPackage(artifactDir: string, reviewScope?: "full" | "differential", changedFiles?: string[]): Promise<string>;
+export declare function buildSourceCodeIndex(cacheKey: string, sourceDir: string, maxExportsPerFile: number, maxRows?: number): Promise<string>;
 /**
  * ideate_get_work_item_context — work item spec + module + domain policies + research
  */

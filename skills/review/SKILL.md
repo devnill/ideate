@@ -22,7 +22,7 @@ Tone: neutral, factual. No encouragement, no validation, no hedging qualifiers. 
 
 Parse the invocation for:
 
-1. **Artifact directory path** — a positional argument. If not provided, search in the current directory and its immediate children for directories containing `plan/execution-strategy.md` and `steering/guiding-principles.md`. If multiple candidates exist, present them and ask the user to choose. If none are found, ask: "What is the path to the artifact directory for this project?"
+1. **Artifact directory path** — a positional argument. If not provided, check for `.ideate.json` in the current working directory — if found, use its `artifactDir` value (resolved relative to that file's location). Otherwise, search in the current directory and its immediate children for directories containing `plan/execution-strategy.md` and `steering/guiding-principles.md`. If multiple candidates exist, present them and ask the user to choose. If none are found, ask: "What is the path to the artifact directory for this project?"
 
 2. **Review mode flags and arguments**:
    - No arguments (beyond artifact dir): **cycle review** (default)
