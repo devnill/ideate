@@ -18,11 +18,11 @@ Available from controller context:
 
 ### Build Shared Context Package
 
-**MCP availability check**: If the MCP tool `ideate_get_context_package` is available:
-1. Call `ideate_get_context_package({artifact_dir})` — returns the pre-assembled context package.
+**MCP availability check**: Look in your tool list for a tool whose name ends in `ideate_get_context_package` (it will be prefixed, e.g. `mcp__ideate_artifact_server__ideate_get_context_package` or `mcp__plugin_ideate_ideate_artifact_server__ideate_get_context_package`). If found:
+1. Call it with `({artifact_dir})` — returns the pre-assembled context package.
 2. Hold the result as `{context_package}`. Skip the manual assembly steps below.
 
-If not available, assemble inline:
+If not found, assemble inline:
 
 1. Read `{artifact_dir}/plan/architecture.md`. If ≤300 lines, include in full. If >300 lines, include only the component map section and interface contracts section.
 2. Read `{artifact_dir}/steering/guiding-principles.md` in full.

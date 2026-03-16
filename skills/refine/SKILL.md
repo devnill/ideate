@@ -49,8 +49,8 @@ Wait for the architect's analysis before proceeding. You need this to ask inform
 
 # Phase 3: Load Prior Context
 
-**MCP availability check**: If the MCP tool `ideate_get_context_package` is available:
-1. Call `ideate_get_context_package({artifact_dir})` — returns architecture, guiding principles, and constraints pre-assembled.
+**MCP availability check**: Look in your tool list for a tool whose name ends in `ideate_get_context_package` (it will be prefixed, e.g. `mcp__ideate_artifact_server__ideate_get_context_package` or `mcp__plugin_ideate_ideate_artifact_server__ideate_get_context_package`). If found:
+1. Call it with `({artifact_dir})` — returns architecture, guiding principles, and constraints pre-assembled.
 2. Hold the result. Skip steps 1–3 below (architecture, principles, constraints). Continue from step 4.
 
 Read all existing artifacts from the artifact directory. Load them in this order:

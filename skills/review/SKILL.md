@@ -164,11 +164,11 @@ The manifest is ~2-3 lines per work item. For 50 items, this is ~150 lines vs re
 
 Before spawning reviewers, assemble a single context package document and hold it in memory. This replaces the pattern where each reviewer independently reads the same architecture, principles, and constraints files.
 
-**MCP availability check**: If the MCP tool `ideate_get_context_package` is available:
-1. Call `ideate_get_context_package({artifact_dir})` — it returns the pre-assembled context package.
+**MCP availability check**: Look in your tool list for a tool whose name ends in `ideate_get_context_package` (it will be prefixed, e.g. `mcp__ideate_artifact_server__ideate_get_context_package` or `mcp__plugin_ideate_ideate_artifact_server__ideate_get_context_package`). If found:
+1. Call it with `({artifact_dir})` — it returns the pre-assembled context package.
 2. Hold the result as `{context_package}`. Skip the manual assembly steps below.
 
-If not available, assemble inline:
+If not found, assemble inline:
 
 **Assembly steps:**
 
