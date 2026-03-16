@@ -72,7 +72,7 @@ For cycle reviews, additionally load:
 5. All domain policies: `domains/*/policies.md` (glob all domains, if `domains/` exists)
 6. Current-cycle incremental reviews: load only from `archive/incremental/` (current cycle's reviews). Do NOT load incremental reviews from prior cycles archived in `archive/cycles/*/incremental/`.
    - If `archive/incremental/` does not exist, fall back to `reviews/incremental/*.md`.
-7. `plan/work-items/*.md` — all work items
+7. Work items — if `plan/work-items.yaml` exists, read it; otherwise glob `plan/work-items/*.md`. The manifest (Phase 3.5) will index these for reviewers.
 
 Do NOT load all prior cycle archives — the domain layer already distills history.
 
@@ -136,33 +136,55 @@ Store the output directory path. All reviewer output goes here.
 
 For **cycle reviews only**, generate a lightweight manifest that reviewers use as an index instead of reading all work items and incremental reviews upfront.
 
-1. Glob `{artifact-dir}/plan/work-items/*.md` — for each file, extract:
-   - Work item number (from filename prefix NNN)
-   - Title (from the `# NNN: {Title}` heading)
-   - File scope (from the `## File Scope` section — list of files with create/modify/delete)
+**Work item source** — use this precedence:
+- If `{artifact-dir}/plan/work-items.yaml` exists: read it directly. The YAML format already contains id, title, and scope for all items in a compact form. Extract items from the `items:` key.
+- Otherwise: glob `{artifact-dir}/plan/work-items/*.md` and extract work item number (NNN prefix), title (`# NNN: {Title}` heading), and file scope (`## File Scope` section).
 
-2. Glob `{artifact-dir}/archive/incremental/*.md` — for each file, extract:
-   - Work item number (from filename prefix NNN)
-   - Verdict (from `## Verdict: {Pass | Fail}`)
-   - Finding count by severity (count `### C`, `### S`, `### M` headings)
+**Incremental review data**: Glob `{artifact-dir}/archive/incremental/*.md` (excluding `review-manifest.md`) — for each file, extract: work item number (NNN prefix), verdict (`## Verdict: {Pass | Fail}`), finding counts (count `### C`, `### S`, `### M` headings).
 
-3. Match incremental reviews to work items by number prefix.
+**Match** incremental reviews to work items by number/ID prefix.
 
-4. Write `{output-dir}/review-manifest.md`:
+**Write** `{output-dir}/review-manifest.md`:
 
-```markdown
-# Review Manifest — Cycle {N}
+    # Review Manifest — Cycle {N}
 
-## Work Items
+    ## Work Items
 
-| # | Title | File Scope | Incremental Verdict | Findings (C/S/M) | Work Item Path | Review Path |
-|---|---|---|---|---|---|---|
-| NNN | {title} | {comma-separated file list} | Pass/Fail/None | {c}/{s}/{m} | plan/work-items/NNN-name.md | archive/incremental/NNN-name.md |
-```
+    | # | Title | File Scope | Incremental Verdict | Findings (C/S/M) | Work Item Path | Review Path |
+    |---|---|---|---|---|---|---|
+    | NNN | {title} | {comma-separated file list} | Pass/Fail/None | {c}/{s}/{m} | plan/work-items/NNN-name.md (or work-items.yaml#{id}) | archive/incremental/NNN-name.md |
 
 Items without incremental reviews show "None" for verdict and "—" for findings and review path.
 
 The manifest is ~2-3 lines per work item. For 50 items, this is ~150 lines vs reading 50 full work item files + 50 review files.
+
+---
+
+# Phase 3.6: Build Shared Context Package
+
+Before spawning reviewers, assemble a single context package document and hold it in memory. This replaces the pattern where each reviewer independently reads the same architecture, principles, and constraints files.
+
+**MCP availability check**: If the MCP tool `ideate_get_context_package` is available:
+1. Call `ideate_get_context_package({artifact_dir})` — it returns the pre-assembled context package.
+2. Hold the result as `{context_package}`. Skip the manual assembly steps below.
+
+If not available, assemble inline:
+
+**Assembly steps:**
+
+1. Read `{artifact-dir}/plan/architecture.md`. If >300 lines, extract the component map and interface contracts sections; otherwise include in full.
+2. Read `{artifact-dir}/steering/guiding-principles.md` (full text).
+3. Read `{artifact-dir}/steering/constraints.md` (full text).
+4. Build a source code index: use Glob to enumerate source files; for each file, note language, approximate size, and key exports (function/class/type names, identified via brief Grep of `export`, `def`, `class`, `func` patterns). Format as a table: `| File | Language | Key Exports |` (~2-5 lines per file).
+
+**Compose** the package as a single markdown document with these sections:
+- `## Architecture` — the architecture content from step 1
+- `## Guiding Principles` — full principles text
+- `## Constraints` — full constraints text
+- `## Source Code Index` — the table from step 4
+- `## Full Document Paths` — absolute paths to architecture.md, guiding-principles.md, constraints.md for agents that need deeper detail
+
+**Target size**: ~500-800 lines. Hold the package in memory as `context_package` — it is passed inline to all reviewer prompts.
 
 ---
 
@@ -183,18 +205,20 @@ All three agents run in parallel. Do not wait for one to finish before starting 
 
 > You are conducting a comprehensive code review of the entire project — not a single work item.
 >
-> Context files to read:
-> - Architecture: {artifact-dir}/plan/architecture.md
-> - Guiding principles: {artifact-dir}/steering/guiding-principles.md
-> - Review manifest: {output-dir}/review-manifest.md — this is your index of all work items and their incremental review status. Use it to understand what was built and where. Read individual work items from `{artifact-dir}/plan/work-items/NNN-{name}.md` only when you find an issue in files covered by that work item and need to check its acceptance criteria or scope.
+> **Shared context package** (inline — do not re-read architecture, principles, or constraints files individually):
+> {context_package}
 >
-> Project source code is at: {project source path}
+> **Review manifest**: {output-dir}/review-manifest.md — your index of all work items and their incremental review status. Read individual work items only when investigating specific findings. Read individual incremental reviews only when you find an issue in the same file scope and need to check whether it was already caught.
 >
-> This is a capstone review. Incremental reviews have already been conducted per work item — their verdicts and finding counts are in the manifest. Read individual incremental reviews from the paths in the manifest only when you find an issue in the same file scope and need to check whether it was already caught. Focus on cross-cutting concerns: consistency across modules, patterns that span multiple work items, integration between components, systemic issues that no single-item review could see.
+> Project source code is at: {project source path} — read source files as needed to investigate specific findings.
+>
+> This is a capstone review. Focus on cross-cutting concerns: consistency across modules, patterns that span multiple work items, integration between components, systemic issues that no single-item review could see.
 >
 > Write your findings to: {output-dir}/code-quality.md
 >
 > Follow the output format defined in your agent instructions. Verdict is Fail if there are any Critical or Significant findings or unmet acceptance criteria. Otherwise Pass.
+
+After this agent returns, record a metrics entry (see Metrics Instrumentation).
 
 ## 4.2 spec-reviewer
 
@@ -207,20 +231,22 @@ All three agents run in parallel. Do not wait for one to finish before starting 
 
 > Verify that the implementation matches the plan, architecture, and guiding principles.
 >
-> Context files to read:
-> - Architecture: {artifact-dir}/plan/architecture.md
-> - Module specs: {artifact-dir}/plan/modules/*.md (if they exist)
-> - Guiding principles: {artifact-dir}/steering/guiding-principles.md
-> - Constraints: {artifact-dir}/steering/constraints.md
-> - Review manifest: {output-dir}/review-manifest.md — use as an index. Read individual work items and incremental reviews only when investigating specific findings in their file scope.
+> **Shared context package** (inline — do not re-read architecture, principles, or constraints files individually):
+> {context_package}
 >
-> Project source code is at: {project source path}
+> **Module specs**: {artifact-dir}/plan/modules/*.md (if they exist — read these for interface contracts).
+>
+> **Review manifest**: {output-dir}/review-manifest.md — use as an index. Read individual work items and incremental reviews only when investigating specific findings in their file scope.
+>
+> Project source code is at: {project source path} — read source files as needed to investigate specific findings.
 >
 > This is a capstone review. Focus on cross-cutting adherence: do all components collectively follow the architecture? Are interfaces consistent across module boundaries? Are guiding principles upheld across the entire codebase, not just within individual work items?
 >
 > Write your findings to: {output-dir}/spec-adherence.md
 >
 > Follow the output format defined in your agent instructions. Include all sections even if empty.
+
+After this agent returns, record a metrics entry (see Metrics Instrumentation).
 
 ## 4.3 gap-analyst
 
@@ -233,21 +259,24 @@ All three agents run in parallel. Do not wait for one to finish before starting 
 
 > Find what is missing from the implementation — things that should exist but do not.
 >
-> Context files to read:
-> - Interview transcript: {artifact-dir}/steering/interview.md
-> - Guiding principles: {artifact-dir}/steering/guiding-principles.md
-> - Constraints: {artifact-dir}/steering/constraints.md
-> - Architecture: {artifact-dir}/plan/architecture.md
-> - Module specs: {artifact-dir}/plan/modules/*.md (if they exist)
-> - Review manifest: {output-dir}/review-manifest.md — use as an index. Read individual work items and incremental reviews only when investigating specific gaps in their file scope.
+> **Shared context package** (inline — do not re-read architecture, principles, or constraints files individually):
+> {context_package}
 >
-> Project source code is at: {project source path}
+> **Interview transcript**: {artifact-dir}/steering/interview.md (read to identify requirements from the original interview).
 >
-> This is a capstone review. Incremental reviews may have already identified per-item gaps. Read them to avoid duplication. Focus on gaps that span the full project: missing requirements from the interview that fell through the cracks across all work items, integration gaps between components, infrastructure that no single work item was responsible for, implicit requirements that the project as a whole should meet.
+> **Module specs**: {artifact-dir}/plan/modules/*.md (if they exist).
+>
+> **Review manifest**: {output-dir}/review-manifest.md — use as an index. Read individual work items and incremental reviews only when investigating specific gaps in their file scope.
+>
+> Project source code is at: {project source path} — read source files as needed to investigate specific gaps.
+>
+> This is a capstone review. Focus on gaps that span the full project: missing requirements from the interview that fell through the cracks across all work items, integration gaps between components, infrastructure that no single work item was responsible for, implicit requirements that the project as a whole should meet.
 >
 > Write your findings to: {output-dir}/gap-analysis.md
 >
 > Follow the output format defined in your agent instructions. Include all sections even if empty.
+
+After this agent returns, record a metrics entry (see Metrics Instrumentation).
 
 Wait for all three reviewers to complete. Verify their output files were written to `{output-dir}/` before proceeding.
 
@@ -268,12 +297,14 @@ Spawn the journal-keeper only AFTER all three reviewers from Phase 4a have compl
 
 > Synthesize the project's history into a decision log and open questions list.
 >
-> Context files to read:
-> - Review manifest: {output-dir}/review-manifest.md — use as an index of all work items and their review status. Read individual incremental reviews only when cross-referencing specific findings.
-> - Journal: read only the last 20 entries from {artifact-dir}/journal.md (not the full file if it is long)
-> - Guiding principles: {artifact-dir}/steering/guiding-principles.md
-> - Plan overview: {artifact-dir}/plan/overview.md
-> - Architecture: {artifact-dir}/plan/architecture.md
+> **Shared context package** (inline — do not re-read architecture or principles files individually):
+> {context_package}
+>
+> **Review manifest**: {output-dir}/review-manifest.md — use as an index of all work items and their review status. Read individual incremental reviews only when cross-referencing specific findings.
+>
+> **Journal**: read only the last 20 entries from {artifact-dir}/journal.md (not the full file if it is long).
+>
+> **Plan overview**: {artifact-dir}/plan/overview.md
 >
 > For cycle reviews, also read `{artifact-dir}/steering/interview.md` or the latest refine interview file from `{artifact-dir}/steering/interviews/` if that directory exists.
 >
@@ -285,6 +316,8 @@ Spawn the journal-keeper only AFTER all three reviewers from Phase 4a have compl
 > Write your output to: {output-dir}/decision-log.md
 >
 > Follow the output format defined in your agent instructions. Build the decision log chronologically. Include cross-references where findings from different reviewers relate to the same concern.
+
+After this agent returns, record a metrics entry (see Metrics Instrumentation).
 
 ---
 
@@ -392,7 +425,23 @@ Read the summary file to make this determination. If no such findings exist, ski
 
 ## 7.2 Spawn Curator
 
-Spawn the `domain-curator` agent with `model: claude-opus-4-6`. This overrides the agent's default model for this task.
+**Pre-screening for conflict signals** (determines model to use):
+
+1. If `{artifact-dir}/domains/` does not exist (first cycle), skip pre-screening. Use `model: sonnet`.
+
+2. Otherwise:
+   a. Glob `{artifact-dir}/domains/*/policies.md`. For each policy file, extract: policy IDs (P-N pattern), domain names (from directory name), and file paths mentioned in the policy body.
+   b. Read `{output-dir}/summary.md`. For each Critical or Significant finding, extract: the domain name (if stated) and any file paths referenced.
+   c. Check for conflict signals — any of:
+      - A finding references the same file path as a path mentioned in an existing policy
+      - A finding's domain name matches an existing policy's domain name
+      - A finding explicitly recommends changing or removing behavior that a policy prescribes
+   d. If any conflict signal is detected: use `model: claude-opus-4-6` (full reasoning needed).
+   e. If no conflict signals detected: use `model: sonnet` (default for non-conflict curation).
+
+3. Log the model selection decision in the journal entry for this review: which model was chosen and why (conflict detected / no conflict / first cycle).
+
+**Spawn the curator** with the model determined above (this overrides the agent's default model):
 
 Provide:
 
@@ -406,7 +455,7 @@ Provide:
 >
 > Process the review output and update the domain layer. Follow your agent instructions.
 
-**Wait for the curator to complete.** The curator runs in the foreground because it writes domain files that downstream skills depend on.
+**Wait for the curator to complete.** The curator runs in the foreground because it writes domain files that downstream skills depend on. After it returns, record a metrics entry (see Metrics Instrumentation).
 
 ## 7.3 After Curator Completes (Cycle Reviews Only)
 
@@ -527,6 +576,38 @@ If no refinement is needed:
 
 - State: "No refinement cycle is needed. The project meets its stated requirements."
 - Suggest the user evaluate the output directly.
+
+---
+
+# Metrics Instrumentation
+
+After each agent spawn (via the Agent tool), append one JSON entry to `{artifact_dir}/metrics.jsonl`. Best-effort only: if writing fails, continue without interruption.
+
+**Entry schema (one JSON object per line):**
+
+    {"timestamp":"<ISO8601>","skill":"review","phase":"<id>","agent_type":"<type>","model":"<model>","work_item":null,"wall_clock_ms":<ms>,"turns_used":<N or null>,"context_files_read":["<path>",...]}
+
+- `timestamp` — ISO 8601 when the agent was spawned.
+- `skill` — `"review"` (constant for this skill).
+- `phase` — phase identifier (e.g., `"4a"`, `"4b"`, `"7.2"`).
+- `agent_type` — the agent definition name (e.g., `"code-reviewer"`, `"spec-reviewer"`, `"gap-analyst"`, `"journal-keeper"`, `"domain-curator"`).
+- `model` — model string passed to Agent tool (e.g., `"sonnet"`, `"claude-opus-4-6"`).
+- `work_item` — `null` (review skill agents are not tied to individual work items).
+- `wall_clock_ms` — elapsed ms between Agent tool invocation and return.
+- `turns_used` — from Agent response metadata if available; `null` otherwise.
+- `context_files_read` — absolute file paths explicitly provided in the agent's prompt.
+
+Record timestamp immediately before the Agent tool call; compute `wall_clock_ms` after it returns.
+
+**Journal summary**: In Phase 8 (Update Journal), append to `journal.md` after the review entry:
+
+> ## [review] {date} — Metrics summary
+> Agents spawned: {N total} (code-reviewer, spec-reviewer, gap-analyst, journal-keeper, {curator if run})
+> Total wall-clock: {total_ms}ms
+> Models used: {list of distinct models}
+> Slowest agent: {agent_type} — {ms}ms
+
+If `metrics.jsonl` could not be written, note "metrics unavailable" and omit the breakdown.
 
 ---
 

@@ -1,0 +1,240 @@
+# brrr Phase 6b: Comprehensive Review Phase
+
+## Entry Conditions
+
+Called after Phase 6a (execute.md) completes. All pending work items have been attempted and have incremental reviews.
+
+Available from controller context:
+- `{artifact_dir}` — absolute path to the artifact directory
+- `{project_source_root}` — absolute path to project source code
+- `{cycle_number}` — current 1-based cycle counter
+- `{formatted_cycle_number}` — cycle number zero-padded to 3 digits (e.g., cycle 1 → `001`)
+- `{cycle_start_commit}` — git commit hash at start of execute phase (null if not a git repo)
+- `{cycle_end_commit}` — git commit hash at end of execute phase
+
+**Set the cycle output directory**: `{artifact_dir}/archive/cycles/{formatted_cycle_number}/`. Create it if it does not exist.
+
+## Instructions
+
+### Build Shared Context Package
+
+**MCP availability check**: If the MCP tool `ideate_get_context_package` is available:
+1. Call `ideate_get_context_package({artifact_dir})` — returns the pre-assembled context package.
+2. Hold the result as `{context_package}`. Skip the manual assembly steps below.
+
+If not available, assemble inline:
+
+1. Read `{artifact_dir}/plan/architecture.md`. If ≤300 lines, include in full. If >300 lines, include only the component map section and interface contracts section.
+2. Read `{artifact_dir}/steering/guiding-principles.md` in full.
+3. Read `{artifact_dir}/steering/constraints.md` in full.
+4. Build source code index: Glob source files (exclude test files, generated files, node_modules, .git, dist, build, __pycache__). For each file, detect language from extension and grep for key exports (first 5 per file). Format as a markdown table: `| File | Language | Key Exports |`.
+5. Compose as a single markdown document with sections in this order:
+   - `## Architecture`
+   - `## Guiding Principles`
+   - `## Constraints`
+   - `## Source Code Index`
+   - `## Full Document Paths` (absolute paths to architecture.md, guiding-principles.md, constraints.md)
+
+Hold as `{context_package}` in memory. Pass inline to all reviewer and journal-keeper prompts. Do not provide file paths to reviewers — pass the assembled content directly.
+
+### Determine Review Scope
+
+Determine whether to use **full review** or **differential review**.
+
+Read `last_full_review_cycle` and `full_review_interval` from `{artifact_dir}/brrr-state.md`. Defaults: `last_full_review_cycle` = 0, `full_review_interval` = 3.
+
+**Full review conditions** (any one → use full review):
+- `{cycle_number}` is 1
+- `({cycle_number} - last_full_review_cycle) >= full_review_interval`
+- `{cycle_start_commit}` is null (git unavailable)
+
+**If full review**: Set `{diff_mode}` = `"full"`. Set `{changed_files}` = all source files. Update `{artifact_dir}/brrr-state.md`: `last_full_review_cycle: {cycle_number}`. Continue with Generate Review Manifest.
+
+**If differential** (cycles 2+ within the interval):
+
+1. Run `git diff --name-only {cycle_start_commit}..{cycle_end_commit}` in `{project_source_root}`.
+   - If the command fails: fall back to full review. Append to `{artifact_dir}/journal.md`: "Cycle {N}: differential diff failed — falling back to full review. Reason: {error}." Set `{diff_mode}` = `"full"`. Update `last_full_review_cycle`.
+   - If no files changed: append to journal: "Cycle {N}: no source files changed — review skipped." Set `{last_cycle_findings}` = `{critical: 0, significant: 0, minor: 0}`. Return to controller immediately — do not spawn reviewers.
+   - Otherwise: store file list as `{changed_files}`.
+
+2. **Interface boundary detection**: For each file in `{changed_files}`, grep `{project_source_root}` source files for import/require/include statements referencing that file's name (without extension). Add matching files to `{changed_files}`. Best-effort — the full-review safety net covers any gaps.
+
+3. Set `{diff_mode}` = `"differential"`. Store `{prior_cycle_formatted}` = previous cycle number zero-padded to 3 digits.
+
+### Generate Review Manifest
+
+Write `{artifact_dir}/archive/incremental/review-manifest.md`:
+
+1. **Work item source** (use precedence):
+   - If `{artifact_dir}/plan/work-items.yaml` exists: read it. Extract id, title, and scope from each item under `items:`.
+   - Otherwise: glob `{artifact_dir}/plan/work-items/*.md` and extract number (NNN prefix), title, and scope.
+2. Glob `{artifact_dir}/archive/incremental/*.md` (excluding `review-manifest.md`). For each file, extract: work item number/id, verdict (`## Verdict:`), finding counts (count `### C`, `### S`, `### M` headings).
+3. Match reviews to work items by number/id. Items without reviews show "None" / "—".
+4. If `{diff_mode}` = `"differential"`: filter to work items whose scope includes at least one file in `{changed_files}`. Include a note at the top of the manifest: "Differential review — scope: {N} changed files + {M} boundary files."
+5. Write the manifest as a table: `| id | title | file scope | verdict | findings (C/S/M) | work item ref | review path |`
+
+### Spawn Three Reviewers in Parallel
+
+Spawn all three simultaneously. Do not wait for one before starting another.
+
+**Differential reviewer additions** (include in all three prompts when `{diff_mode}` = `"differential"`):
+
+> **Differential review scope** — this is cycle {cycle_number}; only a subset of files changed since cycle {prior_cycle_formatted}.
+>
+> **Changed files** (review these and their direct dependencies):
+> {changed_files — one path per line}
+>
+> **Prior cycle baseline**: The cycle {prior_cycle_formatted} review files are at `{artifact_dir}/archive/cycles/{prior_cycle_formatted}/`. Use them as a baseline — findings already present in the prior cycle are known; focus on new or changed issues.
+>
+> Do not re-examine files outside the changed and boundary file lists unless a change in a listed file directly affects an unlisted file's behavior. If you encounter such a case, note it and include the affected file.
+
+**code-reviewer**
+- Model: sonnet
+- MaxTurns: 20
+- Tools: Read, Grep, Glob, Bash
+- Prompt:
+  > You are conducting a comprehensive code review of the entire project.
+  >
+  > **Shared context package** (inline — do not re-read architecture, principles, or constraints files individually):
+  > {context_package}
+  >
+  > **Review manifest**: {artifact_dir}/archive/incremental/review-manifest.md — your index of all work items and incremental review status. Read individual work items and incremental reviews only when investigating specific findings.
+  >
+  > Project source code is at: {project_source_root} — read source files as needed.
+  >
+  > Focus on cross-cutting concerns: consistency across modules, patterns spanning multiple work items, integration between components, systemic issues no single-item review could see.
+  >
+  > Write your findings to: {artifact_dir}/archive/cycles/{formatted_cycle_number}/code-quality.md
+  >
+  > Verdict is Fail if there are any Critical or Significant findings or unmet acceptance criteria. Otherwise Pass.
+
+**spec-reviewer**
+- Model: sonnet
+- MaxTurns: 25
+- Tools: Read, Grep, Glob
+- Prompt:
+  > Verify that the implementation matches the plan, architecture, and guiding principles.
+  >
+  > **Shared context package** (inline — do not re-read architecture, principles, or constraints files individually):
+  > {context_package}
+  >
+  > **Module specs**: {artifact_dir}/plan/modules/*.md (if they exist).
+  >
+  > **Review manifest**: {artifact_dir}/archive/incremental/review-manifest.md — use as an index. Read individual work items and incremental reviews only when investigating specific findings in their file scope.
+  >
+  > Project source code is at: {project_source_root} — read source files as needed.
+  >
+  > Focus on cross-cutting adherence: do all components collectively follow the architecture? Are interfaces consistent across module boundaries? Are guiding principles upheld across the entire codebase?
+  >
+  > For each guiding principle, state whether it is satisfied or violated. The `## Principle Violations` and `## Principle Adherence Evidence` sections of your output are used for automated convergence checking — ensure both sections are present even if empty.
+  >
+  > Write your findings to: {artifact_dir}/archive/cycles/{formatted_cycle_number}/spec-adherence.md
+
+**gap-analyst**
+- Model: sonnet
+- MaxTurns: 25
+- Tools: Read, Grep, Glob
+- Prompt:
+  > Find what is missing from the implementation — things that should exist but do not.
+  >
+  > **Shared context package** (inline — do not re-read architecture, principles, or constraints files individually):
+  > {context_package}
+  >
+  > **Interview transcript**: {artifact_dir}/steering/interview.md (read for original requirements).
+  >
+  > **Module specs**: {artifact_dir}/plan/modules/*.md (if they exist).
+  >
+  > **Review manifest**: {artifact_dir}/archive/incremental/review-manifest.md — use as an index. Read individual work items and incremental reviews only when investigating specific gaps in their file scope.
+  >
+  > Project source code is at: {project_source_root} — read source files as needed.
+  >
+  > Focus on gaps spanning the full project: missing requirements from the interview, integration gaps between components, implicit requirements the project as a whole should meet.
+  >
+  > Write your findings to: {artifact_dir}/archive/cycles/{formatted_cycle_number}/gap-analysis.md
+
+Wait for all three to complete. Verify their output files exist before proceeding. After each reviewer returns, record a metrics entry with `phase: "6b"` (schema in controller SKILL.md).
+
+### Spawn Journal-Keeper (After Reviewers Complete)
+
+**journal-keeper**
+- Model: sonnet
+- MaxTurns: 15
+- Tools: Read, Grep, Glob
+- Prompt:
+  > Synthesize the project history into a decision log and open questions list.
+  >
+  > **Shared context package** (inline — do not re-read architecture, principles, or constraints files individually):
+  > {context_package}
+  >
+  > **Journal**: read only the last 20 entries from {artifact_dir}/journal.md.
+  >
+  > **Interview transcript**: {artifact_dir}/steering/interview.md
+  >
+  > **Plan overview**: {artifact_dir}/plan/overview.md
+  >
+  > **Review manifest**: {artifact_dir}/archive/incremental/review-manifest.md — use as an index. Read individual incremental reviews only when cross-referencing specific findings.
+  >
+  > - Code quality review: {artifact_dir}/archive/cycles/{formatted_cycle_number}/code-quality.md
+  > - Spec adherence review: {artifact_dir}/archive/cycles/{formatted_cycle_number}/spec-adherence.md
+  > - Gap analysis: {artifact_dir}/archive/cycles/{formatted_cycle_number}/gap-analysis.md
+  >
+  > Write your output to: {artifact_dir}/archive/cycles/{formatted_cycle_number}/decision-log.md
+
+After the journal-keeper returns, record a metrics entry with `phase: "6b"`, `agent_type: "journal-keeper"` (schema in controller SKILL.md).
+
+### Collect Review Findings
+
+Read all four output files:
+- `{artifact_dir}/archive/cycles/{formatted_cycle_number}/code-quality.md`
+- `{artifact_dir}/archive/cycles/{formatted_cycle_number}/spec-adherence.md`
+- `{artifact_dir}/archive/cycles/{formatted_cycle_number}/gap-analysis.md`
+- `{artifact_dir}/archive/cycles/{formatted_cycle_number}/decision-log.md`
+
+Walk all findings and classify into: Critical, Significant, Minor, Suggestion.
+
+Build `last_cycle_findings` for return to the controller:
+- `critical_count`: number of critical findings
+- `significant_count`: number of significant findings
+- `minor_count`: number of minor findings
+
+### Update Journal
+
+Append a review summary to `{artifact_dir}/journal.md`:
+
+```markdown
+## [brrr] {date} — Cycle {N} review complete
+Critical findings: {N}
+Significant findings: {N}
+Minor findings: {N}
+```
+
+Also append a per-cycle metrics summary:
+
+```markdown
+## [brrr] {date} — Cycle {N} metrics summary
+Agents spawned: {N total} ({N} workers, {N} code-reviewers, {N} reviewers)
+Total wall-clock: {total_ms}ms
+Models used: {list of distinct models}
+Slowest agent: {agent_type} — {work_item or "N/A"} — {ms}ms
+```
+
+If `metrics.jsonl` could not be written, note "metrics unavailable" and omit the breakdowns.
+
+## Exit Conditions
+
+- `{artifact_dir}/archive/cycles/{formatted_cycle_number}/` contains: code-quality.md, spec-adherence.md, gap-analysis.md, decision-log.md
+- `{artifact_dir}/archive/incremental/review-manifest.md` written
+- `last_cycle_findings` dict populated with critical, significant, minor counts
+- Journal updated with review summary and metrics summary
+
+Return to the controller with `last_cycle_findings`. The controller will run Phase 6c (convergence check).
+
+## Artifacts Written
+
+- `{artifact_dir}/archive/cycles/{formatted_cycle_number}/code-quality.md`
+- `{artifact_dir}/archive/cycles/{formatted_cycle_number}/spec-adherence.md`
+- `{artifact_dir}/archive/cycles/{formatted_cycle_number}/gap-analysis.md`
+- `{artifact_dir}/archive/cycles/{formatted_cycle_number}/decision-log.md`
+- `{artifact_dir}/archive/incremental/review-manifest.md`
+- `{artifact_dir}/journal.md` — appended (review summary + metrics summary)
+- `{artifact_dir}/metrics.jsonl` — one entry per agent spawned

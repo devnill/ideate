@@ -163,6 +163,8 @@ When research results arrive:
 - If the researcher agent writes directly to `{artifact_dir}/steering/research/{topic-slug}.md`, read and integrate the findings as described above.
 - If the researcher returns output in its response instead of writing to disk (e.g., because it lacks Write tool access or returned inline), write the response content to `{artifact_dir}/steering/research/{topic-slug}.md` using the Write tool, then integrate the findings.
 
+After each researcher agent returns, record a metrics entry (see Metrics Instrumentation).
+
 If no session-spawner MCP server or subagent capability is available, note the topics that would benefit from research and continue. You can still leverage your training knowledge but flag that live research was not performed.
 
 ## 2.5 Completion Detection
@@ -305,7 +307,7 @@ The architect will produce:
 - `plan/architecture.md` — component map, data flow, module specifications, interface contracts, execution order, design tensions
 - `plan/modules/{name}.md` — one file per module with Scope, Provides, Requires, Boundary Rules, Internal Design Notes
 
-**Wait for the architect to complete.** The architect runs in the foreground because its output is required before decomposition can begin.
+**Wait for the architect to complete.** The architect runs in the foreground because its output is required before decomposition can begin. After it returns, record a metrics entry (see Metrics Instrumentation).
 
 ## 4.2 Review Architect Output
 
@@ -368,7 +370,7 @@ Spawn one `decomposer` agent per module, in parallel, each with `model: claude-o
 - Relevant research findings from `steering/research/`
 - The starting work item number for that module's range (coordinate numbering across modules to avoid collisions)
 
-Each decomposer produces work items with placeholder numbers. After all decomposers complete, you reconcile: assign final sequential numbers, resolve cross-module dependencies (replacing interface references with concrete work item numbers), and run the full validation suite.
+Each decomposer produces work items with placeholder numbers. After each decomposer returns, record a metrics entry (see Metrics Instrumentation). After all decomposers complete, you reconcile: assign final sequential numbers, resolve cross-module dependencies (replacing interface references with concrete work item numbers), and run the full validation suite.
 
 ## 5.2 Work Item Numbering
 
@@ -530,7 +532,23 @@ State whether each group should run in parallel or sequentially, and why.
 
 Write every artifact file that has not been written yet:
 
-1. `plan/work-items/NNN-{name}.md` — one file per work item, using the exact format from 5.3
+1. Work items — write in consolidated YAML format:
+   - `plan/work-items.yaml` — all structured work item data (id, title, complexity, scope, depends, blocks, criteria). Format:
+
+         items:
+           NNN:
+             title: {title}
+             complexity: {low|medium|high}
+             scope: [{path: ..., op: {create|modify|delete}}]
+             depends: [NNN, ...]
+             blocks: [NNN, ...]
+             criteria:
+               - {plain string criterion}
+             notes: plan/notes/NNN.md
+
+   - `plan/notes/NNN.md` — one file per work item containing only the implementation notes (prose detail). Workers load this file when executing the item.
+
+   If the project already uses legacy per-file format (`plan/work-items/*.md`), continue using that format for consistency unless the user explicitly requests migration.
 2. `plan/execution-strategy.md` — from Phase 6
 3. `journal.md` — initialize with the planning session entry:
 
@@ -696,6 +714,38 @@ Initial policies: {N} (across all domains)
 Initial decisions: {N} (from planning phase)
 Open questions: {N}
 ```
+
+---
+
+# Metrics Instrumentation
+
+After each agent spawn (via the Agent tool), append one JSON entry to `{artifact_dir}/metrics.jsonl`. Best-effort only: if writing fails, continue without interruption.
+
+**Entry schema (one JSON object per line):**
+
+    {"timestamp":"<ISO8601>","skill":"plan","phase":"<id>","agent_type":"<type>","model":"<model>","work_item":null,"wall_clock_ms":<ms>,"turns_used":<N or null>,"context_files_read":["<path>",...]}
+
+- `timestamp` — ISO 8601 when the agent was spawned.
+- `skill` — `"plan"` (constant for this skill).
+- `phase` — phase identifier (e.g., `"2.4"`, `"4.1"`, `"5.1"`).
+- `agent_type` — the agent definition name (e.g., `"researcher"`, `"architect"`, `"decomposer"`).
+- `model` — model string passed to Agent tool (e.g., `"sonnet"`, `"claude-opus-4-6"`).
+- `work_item` — `null` (plan skill agents are not tied to individual work items).
+- `wall_clock_ms` — elapsed ms between Agent tool invocation and return.
+- `turns_used` — from Agent response metadata if available; `null` otherwise.
+- `context_files_read` — absolute file paths explicitly provided in the agent's prompt.
+
+Record timestamp immediately before the Agent tool call; compute `wall_clock_ms` after it returns.
+
+**Journal summary**: At the end of Phase 7.1 (after verifying all artifacts), append to `journal.md`:
+
+> ## [plan] {date} — Metrics summary
+> Agents spawned: {N total} ({breakdown by type})
+> Total wall-clock: {total_ms}ms
+> Models used: {list of distinct models}
+> Slowest agent: {agent_type} — {ms}ms
+
+If `metrics.jsonl` could not be written, note "metrics unavailable" and omit the breakdown.
 
 ---
 

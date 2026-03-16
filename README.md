@@ -57,8 +57,11 @@ All artifacts live in one directory (conventionally `specs/` in the project root
 │   ├── modules/                       # Per-module specs (projects with 5+ modules)
 │   │   └── {module-name}.md
 │   ├── execution-strategy.md          # Parallelism, ordering, agent configuration
-│   └── work-items/                    # Atomic executable tasks
-│       └── NNN-{name}.md
+│   ├── work-items/                    # Atomic executable tasks (legacy per-file format)
+│   │   └── NNN-{name}.md
+│   ├── work-items.yaml                # Consolidated work items (dense YAML format)
+│   └── notes/                         # Extended prose for work items that need it
+│       └── {id}.md
 │
 ├── journal.md                         # Append-only project history
 │
@@ -76,6 +79,8 @@ All artifacts live in one directory (conventionally `specs/` in the project root
 │       └── {YYYYMMDD-slug}/
 │           └── review.md
 │
+├── metrics.jsonl                      # Token/latency metrics — one JSON entry per agent spawn
+│
 └── domains/                           # Distilled knowledge — summaries + citations to archive/
     ├── index.md                        # Domain registry, current cycle number, scope descriptions
     └── {domain-name}/
@@ -83,6 +88,85 @@ All artifacts live in one directory (conventionally `specs/` in the project root
         ├── decisions.md               # Decisions: brief summary + archive citation per decision
         └── questions.md               # Open and resolved questions + archive citations
 ```
+
+---
+
+## Work Item Formats
+
+Ideate supports two work item formats. Skills auto-detect which is present.
+
+### Dense YAML format (recommended)
+
+A single `plan/work-items.yaml` file holds all items:
+
+```yaml
+items:
+  "001":
+    title: "Parser module"
+    depends_on: []
+    group: 1
+    files: [src/parser.ts]
+    criteria:
+      - "Parses standard markdown to AST"
+      - "Handles GFM tables"
+    notes: |
+      Brief inline notes. For longer prose, use plan/notes/001.md.
+```
+
+Key fields: `title`, `depends_on` (DAG edges), `group` (execution order), `files` (scope), `criteria` (acceptance). Extended implementation notes go in `plan/notes/{id}.md` — referenced automatically by workers when present.
+
+### Legacy per-file format
+
+One markdown file per work item in `plan/work-items/NNN-{name}.md`. Still supported as a fallback when `work-items.yaml` does not exist.
+
+### Migration
+
+Convert existing per-file work items to the YAML format:
+
+```bash
+./scripts/migrate-to-optimized.sh path/to/specs
+```
+
+See [Validation and Migration Tools](#validation-and-migration-tools) for details.
+
+---
+
+## Validation and Migration Tools
+
+### `validate-specs.sh`
+
+Non-LLM validation of `plan/work-items.yaml`. Requires `yq` or Python 3 with PyYAML.
+
+```bash
+./scripts/validate-specs.sh <subcommand> [artifact-dir]
+```
+
+| Subcommand | What it checks |
+|---|---|
+| `dag` | Detects cycles in the dependency graph |
+| `overlap` | Finds file scope conflicts between concurrent work items |
+| `coverage` | Verifies all items have criteria and scope defined |
+| `groups` | Topological sort: prints execution groups by dependency depth |
+| `lint` | Flags vague acceptance criteria terms |
+| `all` | Runs all subcommands |
+
+Exit codes: 0 = pass, 1 = errors found, 2 = usage error.
+
+### `migrate-to-optimized.sh`
+
+Applies optimization-cycle migrations to an existing artifact directory: path normalization, schema updates, `metrics.jsonl` initialization, and configuration hints.
+
+```bash
+./scripts/migrate-to-optimized.sh [--dry-run] [--verbose] path/to/specs
+```
+
+- `--dry-run` — reports what would change without modifying anything
+- `--verbose` — explains each action taken
+- Idempotent — safe to run multiple times
+
+### `migrate-to-domains.sh`
+
+Migrates the older `reviews/` directory structure to the current `archive/` + `domains/` layout. See [Migration](#migration) for full details.
 
 ---
 
@@ -333,6 +417,8 @@ After the first cycle review, the curator validates, amends, or confirms plan-ph
 
 **Execution modes**: Sequential, batched parallel, or full parallel (teams with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`). All modes support worktree isolation.
 
+MCP-optimized: context assembly uses `ideate_get_context_package` or `ideate_get_work_item_context` when available.
+
 ---
 
 ### `/ideate:review`
@@ -358,6 +444,8 @@ After the first cycle review, the curator validates, amends, or confirms plan-ph
 - `journal.md` entry (append-only)
 
 **Domain layer interaction**: The domain curator runs as the final phase after journal-keeper. After cycle reviews, it unconditionally processes all findings. After ad-hoc reviews, it runs only if policy-grade, question-grade, or conflict-grade findings exist.
+
+MCP-optimized: context assembly uses `ideate_get_context_package` when available.
 
 ---
 
@@ -389,6 +477,8 @@ After the first cycle review, the curator validates, amends, or confirms plan-ph
 
 **Domain layer interaction**: Reads domain policies and questions as the primary context for current project state. Does not write to domain files — that is the curator's job after the next review cycle.
 
+MCP-optimized: context assembly uses `ideate_get_context_package` when available.
+
 ---
 
 ### `/ideate:brrr`
@@ -402,6 +492,16 @@ After the first cycle review, the curator validates, amends, or confirms plan-ph
 **Convergence**: Requires both (a) zero critical and significant findings AND (b) all guiding principles satisfied simultaneously in the same cycle.
 
 **What it writes**: Same as execute + review combined, per cycle. Also writes `brrr-state.md` (session state) and `proxy-human-log.md` (autonomous decisions).
+
+**Phase document architecture**: Brrr phases are defined in `skills/brrr/phases/` (execute, review, refine, reporting). These are loaded at runtime by the controller, keeping the main SKILL.md focused on orchestration while phases contain per-step instructions.
+
+**Differential review**: Cycle 1 always runs a full review. Cycles 2+ use `git diff` to scope review to changed files and their import-boundary dependents. A forced full review runs every 3 cycles (configurable via `full_review_interval` in `brrr-state.md`). Falls back to full review if git is unavailable or the diff command fails.
+
+**Worker self-check protocol**: Before reporting completion, each worker walks every acceptance criterion from the work item spec, classifying each as `satisfied`, `unsatisfied`, or `unverifiable`. Workers must fix `unsatisfied` criteria before reporting. The incremental code-reviewer then spot-checks `satisfied` claims and prioritizes `unverifiable` criteria.
+
+**Token metrics**: All skills append one JSON entry per agent spawn to `metrics.jsonl` in the artifact directory. Entries record phase, agent type, timing, and token counts. Best-effort — metrics failures never block execution. The journal summary includes per-phase token breakdowns when available.
+
+MCP-optimized: context assembly uses `ideate_get_context_package` or `ideate_get_work_item_context` when available.
 
 ---
 
@@ -607,6 +707,24 @@ current_cycle: 1
 The refine skill loads `domains/*/policies.md` and `domains/*/questions.md` — not the full archive. It presents the open questions (Q-1, Q-2) to the user, produces new work items to add tests and make CSS configurable, and writes a new execution strategy.
 
 The cycle repeats. Each subsequent review is scoped to the current cycle's incremental reviews plus the domain policy layer — not all prior history.
+
+---
+
+## MCP Artifact Server
+
+An optional MCP server (`mcp/artifact-server/`) that indexes the artifact directory and serves pre-assembled context packages to skills on demand. When available, it replaces dozens of individual `Read`/`Glob` calls per agent with single focused queries.
+
+**What it provides**:
+- `ideate_get_context_package` — pre-assembled shared context (architecture, principles, constraints, source index)
+- `ideate_get_work_item_context` — work item spec + module spec + domain policies + research, bundled
+- `ideate_artifact_query` — keyword/semantic search across all artifacts with source citations (RAG)
+- `ideate_domain_policies`, `ideate_artifact_index`, `ideate_source_index` — targeted lookups
+
+**Runtime availability pattern**: Skills check for MCP tool availability at runtime. If the server is configured, they use it; otherwise they fall back to inline file assembly. No configuration change is needed in skill prompts — the check is built in.
+
+**Setup**: See [`mcp/artifact-server/README.md`](mcp/artifact-server/README.md) for build instructions and Claude Code MCP configuration.
+
+The server is read-only and watches for file changes, invalidating cached entries automatically. It supports multiple artifact directories in a single session.
 
 ---
 

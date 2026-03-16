@@ -43,11 +43,15 @@ Prompt for the architect:
 >
 > Focus on areas relevant to understanding what exists, so that a refinement interview can ask informed questions about what to change.
 
-Wait for the architect's analysis before proceeding. You need this to ask informed questions and to avoid asking about things the code already answers.
+Wait for the architect's analysis before proceeding. You need this to ask informed questions and to avoid asking about things the code already answers. After the architect returns, record a metrics entry (see Metrics Instrumentation).
 
 ---
 
 # Phase 3: Load Prior Context
+
+**MCP availability check**: If the MCP tool `ideate_get_context_package` is available:
+1. Call `ideate_get_context_package({artifact_dir})` — returns architecture, guiding principles, and constraints pre-assembled.
+2. Hold the result. Skip steps 1–3 below (architecture, principles, constraints). Continue from step 4.
 
 Read all existing artifacts from the artifact directory. Load them in this order:
 
@@ -57,7 +61,7 @@ Read all existing artifacts from the artifact directory. Load them in this order
 4. `plan/architecture.md` — technical architecture
 5. `plan/modules/*.md` — module specs (if they exist)
 6. `plan/execution-strategy.md` — how execution was structured
-7. `plan/work-items/*.md` — current cycle's work items. If prior cycles have been archived (check for `archive/cycles/*/work-items/`), note their existence but do not load them unless the user's changes specifically reference prior work. The domain layer and cycle summaries already distill prior cycle context.
+7. Work items — if `plan/work-items.yaml` exists, read it (consolidated format); otherwise glob `plan/work-items/*.md` (legacy per-file format). If prior cycles have been archived (check for `archive/cycles/*/work-items/`), note their existence but do not load them unless the user's changes specifically reference prior work. The domain layer and cycle summaries already distill prior cycle context.
 8. `steering/interview.md` — the original interview transcript
 9. `steering/research/*.md` — all research findings
 10. `journal.md` — project history (if it exists)
@@ -177,6 +181,8 @@ Prompt for each researcher:
 >
 > Context: This is a refinement cycle. The project already uses {relevant existing technologies from codebase analysis}. Focus your research on how {new topic} integrates with or affects the existing system.
 
+After each researcher agent returns, record a metrics entry (see Metrics Instrumentation).
+
 Integrate research findings into the refinement plan. If a finding contradicts an assumption from the interview, note the contradiction and resolve it (ask the user if the resolution is unclear).
 
 Research files follow the naming convention in the artifact conventions. If research on this topic already exists, create a new file with a distinguishing suffix (e.g., `oauth2-providers-v2.md`), not overwrite the original.
@@ -278,11 +284,11 @@ Write a new execution strategy for this refinement cycle. The strategy covers on
 - Dependency graph for new items
 - Agent configuration
 
-## 7h. plan/work-items/ — NEW Items
+## 7h. Work Items — NEW Items
 
-Create new work items numbered starting from the highest existing work item number + 1. Use 3-digit zero-padded numbering.
+**Determine the next ID**: if `plan/work-items.yaml` exists, read its `items:` keys and find the highest numeric ID; increment by 1. Otherwise, glob `plan/work-items/` and find the highest NNN prefix. Use 3-digit zero-padded numbering.
 
-To determine the starting number, read the existing work items in `plan/work-items/` and find the highest NNN prefix.
+**Write format**: if `plan/work-items.yaml` exists, append new items to it using the consolidated YAML format. Also create `plan/notes/{id}.md` for each item's implementation notes. If only the legacy format exists, create `plan/work-items/NNN-{name}.md` per item (legacy format).
 
 For refinement work items, follow the same format as defined in the artifact conventions. Key differences from initial planning work items:
 
@@ -303,7 +309,7 @@ For large refinements (5+ work items), spawn `decomposer` agent(s) with `model: 
 >
 > These are REFINEMENT work items. The codebase already exists. Work items should reference existing files to modify, use existing patterns and conventions, and integrate with existing architecture. File scope should use `modify` for existing files.
 
-For small refinements (fewer than 5 work items), produce work items directly without spawning a decomposer.
+For small refinements (fewer than 5 work items), produce work items directly without spawning a decomposer. After each decomposer agent returns, record a metrics entry (see Metrics Instrumentation).
 
 Validate all new work items:
 - Non-overlapping file scope between concurrent new items
@@ -355,6 +361,38 @@ You plan only what changed. Resist the urge to re-plan everything.
 - If the user wants to change the UI framework, plan the migration. Do not re-plan business logic that is framework-independent.
 
 The test: after this refinement cycle, executing the new work items and leaving everything else as-is should produce the desired result. If that is not true — if existing code also needs to change to accommodate the new work — then those existing-code changes must also be captured as work items. But only the changes, not a rewrite.
+
+---
+
+# Metrics Instrumentation
+
+After each agent spawn (via the Agent tool), append one JSON entry to `{artifact_dir}/metrics.jsonl`. Best-effort only: if writing fails, continue without interruption.
+
+**Entry schema (one JSON object per line):**
+
+    {"timestamp":"<ISO8601>","skill":"refine","phase":"<id>","agent_type":"<type>","model":"<model>","work_item":null,"wall_clock_ms":<ms>,"turns_used":<N or null>,"context_files_read":["<path>",...]}
+
+- `timestamp` — ISO 8601 when the agent was spawned.
+- `skill` — `"refine"` (constant for this skill).
+- `phase` — phase identifier (e.g., `"2"`, `"6"`, `"7h"`).
+- `agent_type` — the agent definition name (e.g., `"architect"`, `"researcher"`, `"decomposer"`).
+- `model` — model string passed to Agent tool (e.g., `"sonnet"`, `"claude-opus-4-6"`).
+- `work_item` — `null` (refine skill agents are not tied to individual work items).
+- `wall_clock_ms` — elapsed ms between Agent tool invocation and return.
+- `turns_used` — from Agent response metadata if available; `null` otherwise.
+- `context_files_read` — absolute file paths explicitly provided in the agent's prompt.
+
+Record timestamp immediately before the Agent tool call; compute `wall_clock_ms` after it returns.
+
+**Journal summary**: At the end of Phase 8 (after presenting the refinement summary), append to `journal.md`:
+
+> ## [refine] {date} — Metrics summary
+> Agents spawned: {N total} ({breakdown by type})
+> Total wall-clock: {total_ms}ms
+> Models used: {list of distinct models}
+> Slowest agent: {agent_type} — {ms}ms
+
+If `metrics.jsonl` could not be written, note "metrics unavailable" and omit the breakdown.
 
 ---
 

@@ -1,0 +1,19 @@
+items:
+  "001":
+    title: Item A
+    complexity: low
+    scope:
+      - {path: src/shared.ts, op: modify}
+    depends: []
+    blocks: []
+    criteria:
+      - 'shared.ts modified'
+  "002":
+    title: Item B
+    complexity: low
+    scope:
+      - {path: src/shared.ts, op: modify}
+    depends: []
+    blocks: []
+    criteria:
+      - 'shared.ts modified differently'
