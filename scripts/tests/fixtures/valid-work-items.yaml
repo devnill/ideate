@@ -1,0 +1,21 @@
+items:
+  "001":
+    title: First item
+    complexity: low
+    scope:
+      - {path: src/foo.ts, op: create}
+    depends: []
+    blocks: ["002"]
+    criteria:
+      - 'File src/foo.ts exists'
+      - 'Exports a function named foo'
+  "002":
+    title: Second item
+    complexity: medium
+    scope:
+      - {path: src/bar.ts, op: create}
+    depends: ["001"]
+    blocks: []
+    criteria:
+      - 'File src/bar.ts exists'
+      - 'Imports from src/foo.ts'

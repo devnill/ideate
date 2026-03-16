@@ -1,0 +1,11 @@
+items:
+  "001":
+    title: Vague item
+    complexity: low
+    scope:
+      - {path: src/foo.ts, op: create}
+    depends: []
+    blocks: []
+    criteria:
+      - 'Code follows appropriate patterns'
+      - 'Implementation is robust and flexible'

@@ -6,6 +6,10 @@ dist/
 build/
 *.egg
 
+# MCP artifact server — dist is committed so it works as a plugin without a build step
+!mcp/artifact-server/dist/
+!mcp/artifact-server/dist/**
+
 # Virtual environments
 .venv/
 venv/
@@ -28,3 +32,4 @@ Thumbs.db
 # Environment
 .env
 .env.local
+specs/metrics.jsonl

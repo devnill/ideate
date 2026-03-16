@@ -1,0 +1,19 @@
+items:
+  "001":
+    title: Item A
+    complexity: low
+    scope:
+      - {path: a.ts, op: create}
+    depends: ["002"]
+    blocks: []
+    criteria:
+      - 'a.ts exists'
+  "002":
+    title: Item B
+    complexity: low
+    scope:
+      - {path: b.ts, op: create}
+    depends: ["001"]
+    blocks: []
+    criteria:
+      - 'b.ts exists'

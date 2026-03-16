@@ -52,9 +52,13 @@ Read every artifact in the artifact directory, in this order:
 4. `steering/guiding-principles.md` — decision framework
 5. `steering/constraints.md` — hard boundaries
 6. `plan/modules/*.md` — all module specs (if they exist)
-7. `plan/work-items/*.md` — every work item, read all of them
+7. Work items — read using this precedence:
+   - If `plan/work-items.yaml` exists: read it (consolidated format; see Work Item Format below)
+   - Otherwise: glob and read `plan/work-items/*.md` (legacy per-file format)
 8. `steering/research/*.md` — all research findings (if they exist)
 9. `journal.md` — project history (if it exists)
+
+**Work Item Format**: `plan/work-items.yaml` stores structured fields (id, title, complexity, scope, depends, blocks, criteria) for all work items. Implementation notes for each item are in `plan/notes/{id}.md` — load these per-item when building the worker prompt, not all at once.
 
 If `plan/overview.md` or `journal.md` do not exist, note the absence and continue. All other artifacts listed in step 1 verification are required.
 
@@ -170,9 +174,16 @@ Execute according to the mode specified in the execution strategy.
 
 ## Context for Every Worker
 
+**MCP availability check**: If the MCP tool `ideate_get_work_item_context` is available:
+1. Call `ideate_get_work_item_context({artifact_dir}, {work_item_id})` — returns pre-assembled context including work item spec, module spec, domain policies, and research.
+2. Also provide the project source root path and relevant domain policies (if not already included).
+3. Skip the manual file reads in steps 1–8 below.
+
+If not available, read files manually:
+
 Regardless of execution mode, every worker (subagent, teammate, or the main session in sequential mode) receives:
 
-1. **The work item spec** — `{artifact_dir}/plan/work-items/NNN-{name}.md`
+1. **The work item spec** — if using `work-items.yaml`: the item's entry from that file plus `{artifact_dir}/plan/notes/{id}.md` (implementation notes). If using legacy format: `{artifact_dir}/plan/work-items/NNN-{name}.md`.
 2. **Context digest** — the filtered architecture, principles, and constraints prepared in Phase 4.5 for the current batch. Includes paths to the full documents if the worker needs more detail.
 3. **The relevant module spec** — if `{artifact_dir}/plan/modules/` contains module specs, identify which module the work item belongs to (by matching file scope or explicit module reference) and include that module's spec. If the work item spans modules or no modules exist, include the full architecture doc instead (already provided).
 4. _(Included in context digest)_
@@ -193,12 +204,27 @@ The worker prompt must instruct the agent to:
 - Not make design decisions beyond what the spec prescribes
 - Report completion with a list of files created or modified
 
+The worker prompt must also include this self-check instruction (≤200 words):
+
+> **Before reporting completion**, walk every acceptance criterion from the work item spec. For each, determine:
+> - `satisfied` — met and verifiable from the code or output you produced
+> - `unsatisfied` — not met; fix before reporting completion, then re-verify
+> - `unverifiable` — cannot check without test execution, running services, or external validation
+>
+> Do not report completion while any criterion is `unsatisfied`. Fix it first.
+>
+> Include a `## Self-Check` section in your completion report listing each criterion and its status:
+>
+>     ## Self-Check
+>     - [x] {criterion text} — satisfied
+>     - [ ] {criterion text} — unverifiable: {brief reason}
+
 ## 6a. Sequential Mode
 
 Execute one work item at a time, in dependency order.
 
 1. Select the next work item whose dependencies are all complete
-2. Build the work item (in the main session or via a single subagent)
+2. Build the work item (in the main session or via a single subagent). After the agent returns, record a metrics entry (see Metrics Instrumentation).
 3. On completion, trigger incremental review (Phase 7)
 4. Handle review findings (Phase 8)
 5. Update journal (Phase 10)
@@ -211,7 +237,7 @@ If multiple items have satisfied dependencies, choose by the ordering in the exe
 Execute work items in groups from the execution strategy. Within each group, spawn one subagent per work item, up to the parallelism limit.
 
 1. Start with Group 1 from the execution strategy
-2. For each item in the group, spawn a subagent with the worker context described above
+2. For each item in the group, spawn a subagent with the worker context described above. After each agent returns, record a metrics entry (see Metrics Instrumentation).
 3. If the group has more items than the parallelism limit, execute in sub-batches within the group
 4. Wait for all items in the group to complete
 5. Trigger incremental reviews for all completed items (Phase 7)
@@ -279,12 +305,15 @@ Provide the code-reviewer with:
 - The list of files created or modified by the worker
 - The architecture document (`plan/architecture.md`)
 - The guiding principles (`steering/guiding-principles.md`)
+- The worker's self-check results (the `## Self-Check` section from the worker's completion report)
+
+Instruct the code-reviewer: "Spot-check at least 2 `satisfied` claims. Prioritize investigation of `unverifiable` criteria."
 
 The code-reviewer performs an incremental review scoped to the files touched by that work item.
 
 **Non-blocking**: The review runs while other work items continue. In batched parallel mode, reviews for items in the current group run concurrently with each other. In team mode, a review does not block other teammates from picking up new work items. In sequential mode, the review runs before the next work item begins (it is inherently blocking since only one item runs at a time).
 
-Write the review result to `archive/incremental/NNN-{name}.md`, matching the work item's number and name.
+Write the review result to `archive/incremental/NNN-{name}.md`, matching the work item's number and name. After the code-reviewer returns, record a metrics entry (see Metrics Instrumentation).
 
 The review follows the format defined in the artifact conventions:
 
@@ -532,6 +561,38 @@ If the user stops execution partway through:
 3. List what would be needed to resume (which items are next, any pending Andon cord issues)
 
 The user can re-run `/ideate:execute` to resume. The skill should detect already-completed items (by checking for existing `archive/incremental/NNN-{name}.md` files and journal entries) and skip them.
+
+---
+
+# Metrics Instrumentation
+
+After each agent spawn (via the Agent tool), append one JSON entry to `{artifact_dir}/metrics.jsonl`. Best-effort only: if writing fails, continue without interruption.
+
+**Entry schema (one JSON object per line):**
+
+    {"timestamp":"<ISO8601>","skill":"execute","phase":"<id>","agent_type":"<type>","model":"<model>","work_item":"<slug or null>","wall_clock_ms":<ms>,"turns_used":<N or null>,"context_files_read":["<path>",...]}
+
+- `timestamp` — ISO 8601 when the agent was spawned.
+- `skill` — `"execute"` (constant for this skill).
+- `phase` — phase identifier where the spawn occurred (e.g., `"6a"`, `"7"`).
+- `agent_type` — the agent definition name: `"worker"` for work item workers, `"code-reviewer"` for incremental reviews.
+- `model` — model string passed to Agent tool (e.g., `"sonnet"`).
+- `work_item` — work item slug (e.g., `"005-auth-middleware"`) for workers and their paired code-reviewer; `null` for other agents.
+- `wall_clock_ms` — elapsed ms between Agent tool invocation and return.
+- `turns_used` — from Agent response metadata if available; `null` otherwise.
+- `context_files_read` — absolute file paths explicitly provided in the agent's prompt.
+
+Record timestamp immediately before the Agent tool call; compute `wall_clock_ms` after it returns.
+
+**Journal summary**: At the end of Phase 12 (before presenting the final summary), append to `journal.md`:
+
+> ## [execute] {date} — Metrics summary
+> Agents spawned: {N total} ({N} workers, {N} code-reviewers)
+> Total wall-clock: {total_ms}ms
+> Models used: {list of distinct models}
+> Slowest agent: {agent_type} — {work_item} — {ms}ms
+
+If `metrics.jsonl` could not be written, note "metrics unavailable" and omit the breakdown.
 
 ---
 
