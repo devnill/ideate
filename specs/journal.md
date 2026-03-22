@@ -889,3 +889,186 @@ Agents spawned: 2 total (1 worker, 1 code-reviewer)
 Total wall-clock: ~492000ms
 Models used: sonnet
 Slowest agent: code-reviewer — 465239ms
+
+## [review] 2026-03-22 — Comprehensive review completed
+Critical findings: 0
+Significant findings: 0
+Minor findings: 1
+Suggestions: 0
+Items requiring user input: 0
+Curator: ran (D-34 added, Q-24 resolved, Q-26/Q-27 added; current_cycle set to 8)
+
+## [review] 2026-03-22 — Metrics summary
+Agents spawned: 5 total (code-reviewer, spec-reviewer, gap-analyst, journal-keeper, domain-curator)
+Total wall-clock: ~353000ms
+Models used: sonnet, opus
+Slowest agent: domain-curator — 153572ms
+
+## [refine] 2026-03-22 — Refinement planning completed
+Trigger: User correction after Cycle 008 — WI-120's unconditional-Andon startup failure rule is wrong; startup failure should be diagnosed and surgically fixed, with Andon only if unfixable
+Principles changed: none
+New work items: WI-121
+Replaces the unconditional-Andon startup failure exception with a diagnose-and-fix protocol in skills/execute/SKILL.md Phase 8, skills/brrr/phases/execute.md finding-handling, and specs/domains/workflow/policies.md P-22.
+
+## [refine] 2026-03-22 — Metrics summary
+Agents spawned: 0 total (no agents needed — change fully defined by user correction and current session context)
+Total wall-clock: 0ms
+Models used: none
+Slowest agent: N/A
+
+## [execute] 2026-03-22 — Work item 121: Replace startup-failure unconditional-Andon rule with diagnose-and-fix rule
+Status: complete with rework
+Rework: 1 minor finding fixed from incremental review.
+M1: smoke test re-failure path unspecified — added fallback instruction to step 2 of both execute SKILL.md and brrr execute.md: if smoke test still fails after fix, treat as indeterminate and route to Andon.
+
+## [execute] 2026-03-22 — Metrics summary
+Agents spawned: 2 total (1 worker, 1 code-reviewer)
+Total wall-clock: ~272000ms
+Models used: sonnet
+Slowest agent: code-reviewer — 221956ms
+
+## [review] 2026-03-22 — Comprehensive review completed
+Critical findings: 0
+Significant findings: 1
+Minor findings: 3
+Suggestions: 0
+Items requiring user input: 0
+Curator: ran (D-35 through D-38 added, Q-28 through Q-30 added; current_cycle set to 9; model: opus — conflict signal on agent-system/workflow policies)
+
+## [review] 2026-03-22 — Metrics summary
+Agents spawned: 5 total (code-reviewer, spec-reviewer, gap-analyst, journal-keeper, domain-curator)
+Total wall-clock: ~676000ms
+Models used: sonnet, opus
+Slowest agent: domain-curator — 287755ms
+
+## [refine] 2026-03-22 — Refinement planning completed
+Trigger: Cycle 009 review findings — SG1 (agents/code-reviewer.md still describes startup failure as unconditional Andon), OQ-2 (P-22 missing smoke-test re-run documentation), OQ-5 (no journal instruction on unfixable Andon path)
+Principles changed: none
+New work items: WI-122 through WI-124
+Fixes code-reviewer agent description (WI-122), P-22 precision gap (WI-123), and journal instruction asymmetry on unfixable Andon path (WI-124). All three items are independent and run in parallel.
+
+## [refine] 2026-03-22 — Metrics summary
+Agents spawned: 0 total (no agents needed — changes fully specified by review findings)
+Total wall-clock: 0ms
+Models used: none
+Slowest agent: N/A
+
+## [execute] 2026-03-22 — Work item 122: Fix code-reviewer agent startup-failure description
+Status: complete
+
+## [execute] 2026-03-22 — Work item 123: Amend P-22 to document smoke-test re-run step
+Status: complete
+Note: Incremental review flagged M1 (Derived from field changed) and M2 (heading rewritten) — both are pre-existing changes from WI-121, not introduced by WI-123. Dismissed as false positives.
+
+## [execute] 2026-03-22 — Work item 124: Add journal instruction to unfixable Andon path
+Status: complete with rework
+Rework: 1 significant finding fixed from incremental review.
+S1: paragraph boundary between startup-failure numbered block and general Critical findings was ambiguous. Added "**General critical findings (non-startup-failure)**:" label before the general paragraph in skills/execute/SKILL.md to clearly delineate the two sections.
+
+## [execute] 2026-03-22 — Metrics summary
+Agents spawned: 6 total (3 workers, 3 code-reviewers)
+Total wall-clock: ~1437000ms
+Models used: sonnet
+Slowest agent: code-reviewer (WI-123) — 732067ms
+
+## [review] 2026-03-22 — Comprehensive review completed
+Critical findings: 0
+Significant findings: 0
+Minor findings: 3
+Suggestions: 0
+Items requiring user input: 0
+Curator: ran
+
+## [review] 2026-03-22 — Metrics summary
+Agents spawned: 5 (code-reviewer, spec-reviewer, gap-analyst, journal-keeper, domain-curator)
+Total wall-clock: ~830000ms
+Models used: sonnet
+Slowest agent: domain-curator — 395701ms
+
+## [refine] 2026-03-22 — Refinement planning completed
+Trigger: Cycle 010 minor findings (Q-31) + deferred design questions Q-26, Q-27, Q-3
+Principles changed: none
+New work items: WI-125 through WI-128
+Closes Q-3 (spawn_session ordering), Q-26 (smoke test infra failure), Q-27 (library projects / no startup command), Q-31 (fixable-path journal template). Smoke test concept generalized to "context-appropriate check" with demo heuristic. New P-23 added for infra-failure regression check.
+
+## [refine] 2026-03-22 — Metrics summary
+Agents spawned: 0 (no research or decomposition required — 4 items, all low/medium complexity)
+Total wall-clock: 0ms
+Models used: none
+Slowest agent: N/A
+
+## [execute] 2026-03-22 — Work item 125: Fix spawn_session ordering in skills/review/SKILL.md
+Status: complete with rework
+Rework: 1 significant finding fixed from incremental review.
+S1: Error-handling section (line 682/684) still framed spawn_session as a required fallback. Updated section heading to "Subagent spawning unavailable" and rewrote first sentence to condition on Agent tool unavailability only.
+
+## [execute] 2026-03-22 — Work item 126: Generalize smoke test concept beyond startup command
+Status: complete with rework
+Rework: 2 minor findings fixed from incremental review.
+M1: Removed trailing executor-behavioral sentence from code-reviewer.md step 3 (the reviewer does not need to describe what the executor does next).
+M2: Added summary clause to "General critical findings" heading in execute/SKILL.md to make it carry information rather than act as a bare label.
+
+## [execute] 2026-03-22 — Work item 127: Add quoted template to fixable-path journal note
+Status: complete
+
+## [execute] 2026-03-22 — Work item 128: Add smoke test infrastructure failure handling
+Status: complete with rework
+Rework: 2 minor findings fixed from incremental review.
+M1: Updated "General critical findings" label in execute/SKILL.md to exclude infrastructure-failure findings: "(non-startup-failure, non-infrastructure-failure)".
+M2: Added "no architectural decisions" constraint to the regression path in brrr/phases/execute.md to match the equivalent constraint in execute/SKILL.md.
+
+## [execute] 2026-03-22 — Metrics summary
+Agents spawned: 10 total (4 workers, 4 code-reviewers, 2 re-reviews)
+Total wall-clock: ~594000ms
+Models used: sonnet
+Slowest agent: code-reviewer (WI-125 initial) — ~201000ms
+
+## [review] 2026-03-22 — Comprehensive review completed
+Critical findings: 0
+Significant findings: 1
+Minor findings: 3
+Suggestions: 0
+Items requiring user input: 0
+Curator: ran (sonnet — no conflict signals detected)
+
+## [review] 2026-03-22 — Metrics summary
+Agents spawned: 5 (code-reviewer, spec-reviewer, gap-analyst, journal-keeper, domain-curator)
+Total wall-clock: ~950000ms
+Models used: sonnet
+Slowest agent: domain-curator — ~334000ms
+
+## [refine] 2026-03-22 — Refinement planning completed
+Trigger: Cycle 011 review S1 (significant) + M2 (minor)
+Principles changed: none
+New work items: WI-129
+Addresses S1/OQ-8 (inline prompt smoke test condition mismatch in execute/SKILL.md:325 and brrr/phases/execute.md:113) and M2/OQ-9 (brrr finding-handling label missing exclusion qualifier at brrr/phases/execute.md:160). P-23 wording already corrected by Cycle 011 domain curator.
+
+## [refine] 2026-03-22 — Metrics summary
+Agents spawned: 1 (architect — analyze mode)
+Total wall-clock: ~127000ms
+Models used: claude-opus-4-6
+Slowest agent: architect — ~127000ms
+
+## [execute] 2026-03-22 — Work item 129: Fix inline prompt smoke test condition and brrr label consistency
+Status: complete
+Three line edits applied as specified. Incremental review initial Fail (S1/S2) was false positive — code-reviewer attributed pre-existing uncommitted Cycle 011 changes to WI-129. All four ACs confirmed satisfied.
+
+## [execute] 2026-03-22 — Metrics summary
+Agents spawned: 2 total (1 worker, 1 code-reviewer)
+Total wall-clock: ~82000ms
+Models used: sonnet
+Slowest agent: code-reviewer — ~51000ms
+
+## [review] 2026-03-22 — Comprehensive review completed
+Critical findings: 0
+Significant findings: 0
+Minor findings: 2
+Suggestions: 0
+Items requiring user input: 0
+Curator: ran (opus — Q-33/Q-34 resolution triggers domain write)
+
+## [review] 2026-03-22 — Metrics summary
+Agents spawned: 5 (code-reviewer, spec-reviewer, gap-analyst, journal-keeper, domain-curator)
+Total wall-clock: ~511000ms
+Models used: sonnet (reviewers), opus (curator)
+Slowest agent: domain-curator — ~219000ms

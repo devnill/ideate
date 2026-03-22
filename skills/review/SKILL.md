@@ -190,7 +190,7 @@ If not found, assemble inline:
 
 # Phase 4a: Spawn Three Reviewers in Parallel
 
-Spawn three review agents simultaneously. Each receives the relevant subset of context and has access to the project source code. Use `spawn_session` (if the session-spawner MCP server is available) or subagents.
+Spawn three review agents simultaneously. Each receives the relevant subset of context and has access to the project source code. Use the Agent tool to spawn subagents. If the outpost MCP server is configured, `spawn_session` may be used as an alternative.
 
 All three agents run in parallel. Do not wait for one to finish before starting another.
 
@@ -679,9 +679,9 @@ If `metrics.jsonl` could not be written, note "metrics unavailable" and omit the
 
 # Error Handling
 
-## Session spawner unavailable
+## Subagent spawning unavailable
 
-If `spawn_session` is not available and subagent spawning is not supported, you cannot run reviewers in parallel. In this case, run all four reviews yourself, sequentially, following each agent's instructions. Write the output files as you go. This is slower but produces the same artifacts. Maintain the Phase 4a/4b ordering: run code-reviewer, spec-reviewer, and gap-analyst first, then run journal-keeper last so it can cross-reference the other three outputs.
+If the Agent tool is not available for spawning subagents, you cannot run reviewers in parallel. In this case, run all four reviews yourself, sequentially, following each agent's instructions. Write the output files as you go. This is slower but produces the same artifacts. Maintain the Phase 4a/4b ordering: run code-reviewer, spec-reviewer, and gap-analyst first, then run journal-keeper last so it can cross-reference the other three outputs.
 
 When reviewing sequentially yourself, follow each agent's checklist and output format exactly. Do not blend concerns — keep code quality, spec adherence, gap analysis, and decision synthesis in separate outputs. The separation is the point.
 

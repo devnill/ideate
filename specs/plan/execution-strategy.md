@@ -1,36 +1,35 @@
-# Execution Strategy — Cycle 011
+# Execution Strategy — Cycle 012
 
 ## Mode
 
-Sequential — one work item.
+Sequential — one work item, no parallelism needed.
 
 ## Parallelism
 
-N/A — single item.
+1 (single worker).
 
-## Worktree Configuration
+## Worktrees
 
-None required. All changes are to markdown files.
+Disabled.
 
 ## Review Cadence
 
-Standard incremental review after work item completes. Capstone review after completion.
+Incremental review after WI-129 completes, then capstone review.
 
 ## Work Item Groups
 
-### Group A
+### Group A (Sequential)
 
-| Work Item | Title | Complexity | Files |
-|---|---|---|---|
-| WI-120 | Add startup-failure exception to execute finding-handling | low | `skills/execute/SKILL.md`, `skills/brrr/phases/execute.md` |
+1. WI-129: Fix inline prompt smoke test condition and brrr label consistency
+
+No dependencies. Single item.
 
 ## Dependency Graph
 
-```
-WI-120 ──▶ (capstone review)
-```
+WI-129 has no dependencies.
 
 ## Agent Configuration
 
-- Worker: default model (sonnet)
-- Incremental reviewer: default model (sonnet)
+Workers: sonnet.
+Code-reviewers: sonnet.
+Max turns: default.

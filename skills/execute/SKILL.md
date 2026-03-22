@@ -322,7 +322,7 @@ Instruct the code-reviewer:
 > 2. Attempt to verify at least 2 of them by reading the relevant source files. If a criterion marked `unverifiable` can actually be verified by file inspection, reclassify it and report it as either `satisfied` or `unsatisfied`.
 > 3. Only accept `unverifiable` for criteria that genuinely require runtime testing, external system dependencies, or human judgment that cannot be derived from file contents.
 >
-> **Dynamic testing (incremental scope)**: After your static review, perform the dynamic checks defined in your agent instructions under "Dynamic Testing > Incremental review scope". Discover the project's test model, run the smoke test, and run tests scoped to the changed files. If the project cannot build or start, report a Critical finding titled "Startup failure after [work item name]".
+> **Dynamic testing (incremental scope)**: After your static review, perform the dynamic checks defined in your agent instructions under "Dynamic Testing > Incremental review scope". Discover the project's test model, run the smoke test, and run tests scoped to the changed files. If the smoke test fails, report a Critical finding titled "Startup failure after [work item name]".
 
 The code-reviewer performs an incremental review scoped to the files touched by that work item.
 
@@ -397,7 +397,17 @@ Do not present significant-but-fixable findings to the user unless they indicate
 
 ## Critical Findings
 
-**Exception — Startup failure**: Any Critical finding titled "Startup failure after [work item name]" is always treated as scope-changing. Do NOT attempt to fix it. Route to the Andon cord immediately, regardless of whether the fix appears simple or contained.
+**Exception — Startup failure**: Any Critical finding titled "Startup failure after [work item name]" requires immediate root-cause diagnosis. Do not apply the general fixable/scope-changing judgment to this finding class. Instead:
+1. Diagnose the root cause from the startup failure output.
+2. If the root cause is fixable within the current work item's scope: apply a surgical fix. Note in the journal: `Rework: Startup failure root cause diagnosed and fixed. {brief description of fix}.` Re-run the smoke test to confirm it passes. If the smoke test still fails after the fix, treat the root cause as indeterminate and route to the Andon cord (Phase 9).
+3. If the root cause cannot be fixed (requires changes outside this work item's scope, architectural changes, or is indeterminate): append to the journal — `Diagnosis: {root cause finding}. Routing to Andon — cause not fixable within work item scope.` Then route to the Andon cord (Phase 9).
+
+**Exception — Smoke test infrastructure failure**: If the smoke test cannot execute at all (runner not found, environment setup error, pre-execution crash — not an application failure), this is a distinct case from a startup failure. Instead:
+1. Determine if the infrastructure failure is a regression caused by this work item's changes (e.g., changes to config files, dependency manifests, port bindings, or environment definitions).
+2. If it is a regression: diagnose the root cause. Apply a careful surgical fix — do not expand scope or make architectural decisions. Re-run the smoke test. If it still fails, treat as indeterminate and route to the Andon cord (Phase 9) with journal note: `Diagnosis: {root cause finding}. Routing to Andon — smoke test infrastructure failure persists after fix.`
+3. If it is not a regression (pre-existing or environmental): append to the journal — `Smoke test infrastructure failure detected. Not a regression — routing to Andon.` Route to the Andon cord (Phase 9).
+
+**General critical findings (non-startup-failure, non-infrastructure-failure)**: Apply normal scope judgment.
 
 If the finding is fixable within the work item's scope without changing the plan: fix it, note in the journal as significant rework.
 

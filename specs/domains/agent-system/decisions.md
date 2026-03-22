@@ -37,3 +37,22 @@
 - **Rationale**: Decided during refine-008 interview to prevent policy accumulation as the domain layer grows across cycles.
 - **Source**: archive/cycles/003/decision-log.md D3
 - **Status**: settled
+
+## D-38: code-reviewer.md not updated when startup-failure protocol changed in cycle 009
+- **Decision**: WI-121 replaced the unconditional-Andon startup-failure rule with a diagnose-and-fix protocol in the two skill files and P-22, but `agents/code-reviewer.md` (~line 91) was explicitly excluded from scope. The code-reviewer agent still instructs that startup failure is "scope-changing — this is an Andon-level issue," contradicting the new protocol.
+- **Rationale**: The scoping decision (D-36) treated the code-reviewer update as secondary. The gap analyst rated this Significant because the code-reviewer is used in every execution cycle and its incorrect description of expected downstream handling creates a documented inconsistency.
+- **Source**: archive/cycles/009/gap-analysis.md SG1; archive/cycles/009/decision-log.md DL-2, DL-4
+- **Status**: settled
+
+## D-40: code-reviewer.md updated to describe diagnose-and-fix protocol, closing Q-28
+- **Decision**: WI-122 replaced the stale phrase "treat it as scope-changing — this is an Andon-level issue" at `agents/code-reviewer.md:91` with language describing the current protocol: "The executor will diagnose the root cause and attempt a surgical fix before routing to Andon if the cause is unfixable." The finding title convention ("Startup failure after [work item name]") was preserved.
+- **Rationale**: D-38 documented the inconsistency; D-36 had explicitly deferred this file as secondary. The gap analyst rated it Significant because the code-reviewer is invoked in every execution cycle and its stale instructions would lead any code-reviewer agent to describe the wrong expected executor behavior.
+- **Source**: archive/cycles/010/decision-log.md D-40; archive/cycles/010/spec-adherence.md WI-122
+- **Status**: settled
+
+## D-47: code-reviewer.md smoke test generalized from startup-command-specific to context-appropriate demo heuristic
+- **Decision**: WI-126 replaced the startup-specific smoke test instruction in `agents/code-reviewer.md:84-92` with a heuristic based on "what would a reasonable person be expected to do to demo the work they just did?" Five example types are listed as non-exhaustive: startup command, CLI --help/--version, library build/test suite, e2e test, and config/doc validation.
+- **Rationale**: The prior agent instruction assumed every project has a startup command, making the smoke test step structurally inert for library projects, CLI tools, and documentation-only work items. The demo heuristic resolves Q-27 without enumerating an exhaustive type list and aligns with GP-9 (Domain Agnosticism).
+- **Assumes**: The code-reviewer determines the appropriate smoke test from context at review time; the five listed examples are illustrative, not exhaustive.
+- **Source**: archive/cycles/011/decision-log.md D-44; archive/cycles/011/review-manifest.md WI-126
+- **Status**: settled
