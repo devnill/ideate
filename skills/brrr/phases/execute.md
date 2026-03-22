@@ -110,7 +110,7 @@ Include the following in the code-reviewer's prompt:
   > 2. Attempt to verify at least 2 of them by reading the relevant source files. If verifiable by file inspection, reclassify as `satisfied` or `unsatisfied`.
   > 3. Only accept `unverifiable` for criteria requiring runtime testing, external system dependencies, or human judgment that cannot be derived from file contents.
   >
-  > **Dynamic testing (incremental scope)**: After your static review, perform the dynamic checks defined in your agent instructions under "Dynamic Testing > Incremental review scope". Discover the project's test model, run the smoke test, and run tests scoped to the changed files. If the project cannot build or start, report a Critical finding titled "Startup failure after [work item name]".
+  > **Dynamic testing (incremental scope)**: After your static review, perform the dynamic checks defined in your agent instructions under "Dynamic Testing > Incremental review scope". Discover the project's test model, run the smoke test, and run tests scoped to the changed files. If the smoke test fails, report a Critical finding titled "Startup failure after [work item name]".
 
 Write the result to `{artifact_dir}/archive/incremental/NNN-{name}.md`. After the code-reviewer returns, record a metrics entry with `phase: "6a"`, `agent_type: "code-reviewer"`. Include `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens` from agent response metadata (null if unavailable), and `mcp_tools_called` (array of MCP tool names used to assemble context, or `[]` if none). (Full schema including `skill` and `cycle` fields defined in controller SKILL.md.)
 
@@ -155,8 +155,9 @@ If a severity section has no findings, include the header with "None." underneat
 
 - **Minor findings**: Fix immediately, silently. Note rework in the journal entry.
 - **Significant findings within scope**: Fix. Note rework in the journal entry.
-- **Critical findings — "Startup failure after ..."**: Always scope-changing. Do NOT fix. Route to Andon cord → proxy-human immediately, regardless of apparent fixability.
-- **Critical findings fixable within scope**: Fix. Note as significant rework in the journal entry.
+- **Critical findings — "Startup failure after ..."**: Diagnose root cause immediately. If fixable within scope: apply surgical fix, note in the journal: `Rework: Startup failure root cause diagnosed and fixed. {brief description of fix}.` Re-run smoke test. If smoke test still fails after fix, treat as indeterminate and route to Andon cord → proxy-human. If not fixable (scope change required, cause indeterminate): note in journal — `Diagnosis: {root cause finding}. Routing to Andon — cause not fixable within work item scope.` Route to Andon cord → proxy-human.
+- **Smoke test infrastructure failure (runner cannot execute)**: Determine if the failure is a regression caused by this work item (config files, dependency manifests, port bindings changed). If regression: diagnose, apply surgical fix (no scope expansion, no architectural decisions), re-run. If still fails: journal — `Diagnosis: {root cause finding}. Routing to Andon — smoke test infrastructure failure persists after fix.` Route to Andon cord → proxy-human. If not a regression: journal — `Smoke test infrastructure failure detected. Not a regression — routing to Andon.` Route to Andon cord → proxy-human.
+- **Critical findings fixable within scope (non-startup-failure, non-infrastructure-failure)**: Fix. Note as significant rework in the journal entry.
 - **Critical findings that are scope-changing or worktree merge conflicts**: Do NOT fix. Route to Andon cord → proxy-human (see below).
 - **Unmet acceptance criteria**: Attempt to fix. If unfixable due to spec issues, route to Andon cord → proxy-human.
 

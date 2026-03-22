@@ -42,3 +42,11 @@
 - **Impact**: Functionally sufficient — key terms are unique substrings and the cross-references resolve unambiguously in practice. Cosmetic only. Exact matching would reduce ambiguity when the agent definition evolves.
 - **Status**: open
 - **Reexamination trigger**: Next documentation pass touching agents/code-reviewer.md or the dynamic testing spawn prompts.
+
+## Q-28: code-reviewer.md startup-failure language contradicts P-22 diagnose-and-fix protocol
+- **Question**: `agents/code-reviewer.md` (~line 91) instructs the code-reviewer that startup failure is "scope-changing — this is an Andon-level issue." Under P-22 as amended in cycle 009, startup failure is no longer unconditionally scope-changing: it triggers a diagnose-and-fix protocol with Andon as fallback only. Should the language be replaced with something consistent with the new protocol, such as "the executor will diagnose the root cause and attempt a fix before routing to Andon if unfixable"?
+- **Source**: archive/cycles/009/gap-analysis.md SG1; archive/cycles/009/decision-log.md DL-4, OQ-1
+- **Impact**: The code-reviewer is a shared agent definition used in every execution cycle. Its incorrect description of expected downstream handling creates a documented inconsistency — a code-reviewer reading its own instructions would believe Andon is the only correct response to startup failure.
+- **Status**: resolved
+- **Resolution**: WI-122 replaced the stale phrase with language describing the diagnose-and-fix protocol at `agents/code-reviewer.md:91`.
+- **Resolved in**: cycle 010

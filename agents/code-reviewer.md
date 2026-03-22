@@ -83,12 +83,15 @@ If no test runner is discoverable, note this in findings and skip dynamic testin
 
 **Step 2 — Incremental review scope (single work item):**
 
-1. Smoke test: verify the project still builds or starts after the work item's changes.
-   - For compiled languages: run the build command and check for errors.
-   - For interpreted languages: attempt to import the main module or start the app in dry-run mode.
-   - For CLIs: run `--help` or `--version` as a startup proxy.
+1. Select and run a context-appropriate smoke test. The heuristic: **what would a reasonable person be expected to do to demo the work they just did?**
+   - Web app / service: run the startup command and verify the project starts (no crash, no immediate exit).
+   - CLI tool: run `--help` or `--version` as a startup proxy.
+   - Library / package: build or compile successfully; run the test suite for the changed module.
+   - e2e feature: run a representative user flow or end-to-end test covering the changed behavior.
+   - Documentation or config change: validate syntax/structure (no code smoke test required).
+   - If no obvious smoke test applies: note this in findings and skip dynamic testing.
 2. Run tests targeted to the changed files: find and run tests whose file names or import paths correspond to the modified source files.
-3. **If the smoke test fails (the project cannot build or start), report this as a Critical finding** with title "Startup failure after [work item name]" and treat it as scope-changing — this is an Andon-level issue.
+3. **If the smoke test fails, report this as a Critical finding** with title "Startup failure after [work item name]".
 
 **Step 3 — Comprehensive review scope (full project):**
 

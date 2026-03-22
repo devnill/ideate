@@ -48,8 +48,15 @@ When two or more work items share a data contract (one defines a schema, another
 - **Established**: cycle 004
 - **Status**: active
 
-## P-22: Startup failure Critical findings always route to Andon — execute skill must not apply scope judgment
-When the code-reviewer emits a Critical finding titled "Startup failure after ...", `skills/execute/SKILL.md` Phase 8 and `skills/brrr/phases/execute.md` finding-handling must treat it as scope-changing unconditionally. The execute skill's general scope-judgment rule does not apply to this finding class; apparent fixability within the work item's scope is not a valid reason to suppress escalation.
-- **Derived from**: D-33 (Startup failure must bypass scope judgment)
+## P-22: Startup failure Critical findings require immediate diagnosis and surgical fix; Andon only if unfixable
+When the code-reviewer emits a Critical finding titled "Startup failure after ...", `skills/execute/SKILL.md` Phase 8 and `skills/brrr/phases/execute.md` finding-handling must immediately diagnose the root cause and apply a surgical fix if the cause is within the current work item's scope. After applying the fix, the smoke test must be re-run to confirm the smoke test passes. If it still fails, the root cause is classified as indeterminate and the Andon cord must be pulled. If the Andon cord is triggered, the executor must record a journal entry before escalating. The Andon cord is triggered only if the root cause cannot be fixed (requires changes outside the current work item, architectural changes, or the cause is indeterminate). Silent correction without diagnosis and user escalation without attempted repair are both incorrect. The appropriate smoke test is determined by the code-reviewer based on the work item's context — what a reasonable person would be expected to do to demo the work just completed (startup command, CLI invocation, library build, e2e test, or config/doc validation, as appropriate).
+- **Derived from**: D-33 (amended), user correction after Cycle 008
 - **Established**: cycle 007
+- **Amended**: cycle 009, cycle 010, cycle 011
+- **Status**: active
+
+## P-23: Smoke test infrastructure failures require regression determination before Andon escalation
+When the smoke test cannot execute at all (infrastructure failure — runner not found, environment setup error, pre-execution crash), the executor must determine whether the failure is a regression caused by this work item's changes before routing to Andon. If the failure is determined to be a regression (e.g., the work item changed config, dependencies, port bindings, or environment files and those changes are causally linked to the failure), diagnose and attempt a careful surgical fix within scope. If the fix fails or the failure is not a regression (pre-existing or environmental), route to Andon with a journal note citing the diagnostic finding. Silent treatment of infra failures as application failures is incorrect.
+- **Derived from**: D-45 (smoke test infrastructure failure handling); Q-26 (smoke test blocking scenario); user decision in cycle 011 refinement interview
+- **Established**: cycle 011
 - **Status**: active

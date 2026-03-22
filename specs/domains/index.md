@@ -1,6 +1,6 @@
 # Domain Registry
 
-current_cycle: 7
+current_cycle: 12
 
 ## Domains
 
@@ -38,4 +38,6 @@ Files: domains/project-boundaries/policies.md, decisions.md, questions.md
 
 **Stale agent path references (cycle 005 reopened)**: Q-15 (agent-system) was marked resolved in cycle 003 but cycle 005 code-quality and gap-analysis independently confirmed the stale `reviews/incremental/` paths persist in `agents/spec-reviewer.md` and `agents/gap-analyst.md`. Q-15 is reopened. This should be bundled with Q-22 and Q-23 in the next documentation-fix work item.
 
-**Startup failure Andon enforcement gap (cycle 007)**: Q-24 (workflow) identifies that P-22 is not yet implemented — `skills/execute/SKILL.md` Phase 8 and `skills/brrr/phases/execute.md` finding-handling have no explicit exception rule for "Startup failure after ..." Critical findings. Proposed as WI-120; low complexity, high priority given the quality floor established by WI-117.
+**Startup failure protocol consistency (cycles 007-012)**: The startup-failure protocol is fully described in P-22 (amended through cycle 011). The context-appropriate smoke test generalization (D-44/WI-126) extended P-22 to cover library, CLI, e2e, and documentation-only projects. The infrastructure-failure regression-determination protocol is captured in P-23 (D-45/WI-128). Cycle 012 closed the two remaining follow-ups: Q-33 (inline prompt fragments updated by WI-129) and Q-34 (brrr label qualifier added by WI-129). The smoke test generalization is now complete across all locations.
+
+**Smoke test inline prompt inconsistency (cycle 011)**: Resolved in cycle 012. Q-33 and Q-34 both closed by WI-129 (D-48). All inline prompts and labels now use language consistent with the generalized agent definition.

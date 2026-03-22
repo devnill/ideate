@@ -61,3 +61,80 @@
 - **Source**: archive/cycles/007/gap-analysis.md II1; archive/cycles/007/summary.md Significant Findings
 - **Policy**: P-22
 - **Status**: settled
+
+## D-34: WI-120 confirmed P-22 enforcement — startup-failure exception implemented in both skill files
+- **Decision**: WI-120 added the unconditional startup-failure exception rule to both `skills/execute/SKILL.md` Phase 8 and `skills/brrr/phases/execute.md` finding-handling block. The exception evaluates before the general fixable-within-scope routing logic. All three capstone reviewers returned Pass with zero Critical or Significant findings.
+- **Rationale**: D-33 established the rule; WI-120 is its procedural enforcement. The exception is expressed as a named block that keys on the "Startup failure after ..." title prefix. The code-reviewer agent generates that exact title, completing the generation-to-handling round-trip.
+- **Source**: archive/cycles/008/decision-log.md D-34; archive/cycles/008/summary.md
+- **Policy**: P-22 (enforcement, not amendment)
+- **Status**: settled
+
+## D-35: Replace unconditional-Andon startup-failure rule with diagnose-and-fix protocol
+- **Decision**: The unconditional-Andon startup-failure rule from D-33/WI-120 was replaced. Startup failures with a diagnosable, in-scope root cause are now fixed autonomously; Andon escalation is reserved for unfixable, out-of-scope, or indeterminate causes.
+- **Rationale**: GP-6 ("User intervention is reserved for critical issues that cannot be resolved from existing steering documents") and P-5 both require escalation as last resort. The cycle 008 rule escalated fixable failures to the user unnecessarily.
+- **Source**: archive/cycles/009/decision-log.md DL-1; archive/cycles/009/spec-adherence.md
+- **Policy**: P-22 (amended in cycle 009)
+- **Status**: settled
+
+## D-36: WI-121 scoped to three files; code-reviewer agent excluded
+- **Decision**: WI-121 targeted `skills/execute/SKILL.md`, `skills/brrr/phases/execute.md`, and `specs/domains/workflow/policies.md`. `agents/code-reviewer.md` was explicitly excluded despite containing language inconsistent with the new protocol.
+- **Rationale**: The scoping decision (D-36) treated the code-reviewer update as secondary, deferred to a future cycle. This produced SG1 in gap analysis.
+- **Source**: archive/cycles/009/decision-log.md DL-2, DL-4; archive/cycles/009/gap-analysis.md SG1
+- **Status**: settled
+
+## D-37: Smoke-test re-failure fallback added as execution-time extension
+- **Decision**: Both skill files were extended beyond WI-121's specified replacement text to add: "If the smoke test still fails after the fix, treat the root cause as indeterminate and route to the Andon cord." Surfaced as M1 in incremental review and fixed before delivery.
+- **Rationale**: Without this clause the executor had no instruction if the post-fix smoke test still failed. Behaviorally consistent with P-22's existing "cause is indeterminate" Andon trigger. P-22 was not amended to include this detail.
+- **Source**: archive/cycles/009/decision-log.md DL-3; archive/cycles/009/code-quality.md M1; archive/cycles/009/spec-adherence.md D1
+- **Status**: settled
+
+## D-39: Added paragraph boundary label between startup-failure block and general Critical findings in execute/SKILL.md
+- **Decision**: The label `**General critical findings (non-startup-failure)**:` was added immediately before the general Critical findings paragraph in `skills/execute/SKILL.md` Phase 8. The corresponding brrr file did not need the label because its bullet structure already provides a clear visual boundary.
+- **Rationale**: WI-124 incremental review flagged S1: the two adjacent blocks (numbered startup-failure steps and the general Critical paragraph) had no typographic separator. An executor reading sequentially could apply startup-failure routing to all Critical findings. Adding an explicit label closes the ambiguity without restructuring Phase 8.
+- **Source**: archive/cycles/010/decision-log.md D-39; archive/cycles/010/spec-adherence.md
+- **Status**: settled
+
+## D-41: P-22 back-propagated to include smoke-test re-run and indeterminate classification
+- **Decision**: WI-123 appended two sentences to P-22's body: "After applying the fix, the smoke test must be re-run to confirm the app starts. If it still fails, the root cause is classified as indeterminate and the Andon cord must be pulled." P-22 now describes the full five-step startup-failure protocol.
+- **Rationale**: D-37 (cycle 009) recorded that the re-run step was added to both skill files at execution time but was never back-propagated to P-22. Future work items consulting P-22 would be missing this requirement, risking regression of the re-run step.
+- **Source**: archive/cycles/010/decision-log.md D-41; archive/cycles/010/spec-adherence.md
+- **Policy**: P-22 (amendment)
+- **Status**: settled
+
+## D-42: Journal instruction added to the unfixable Andon path in both skill files
+- **Decision**: WI-124 added an exact quoted journal template to the unfixable startup-failure path in `skills/execute/SKILL.md` Phase 8 and `skills/brrr/phases/execute.md`: `` `Diagnosis: {root cause finding}. Routing to Andon — cause not fixable within work item scope.` ``
+- **Rationale**: The fixable path already instructed "note in the journal as significant rework." The unfixable path had no equivalent, meaning diagnostic context was lost when the executor escalated to Andon. The fixable-path instruction provided the precedent; the quoted-template style was used to match it and the unfixable-path entry added by this work item.
+- **Source**: archive/cycles/010/decision-log.md D-42; archive/cycles/010/spec-adherence.md
+- **Status**: settled
+
+## D-43: Close Q-3 by correcting spawn_session ordering in skills/review/SKILL.md
+- **Decision**: WI-125 updated `skills/review/SKILL.md` Phase 4a to state "Use the Agent tool to spawn subagents. If the outpost MCP server is configured, `spawn_session` may be used as an alternative." The error-handling section was also updated to key on Agent tool availability rather than spawn_session unavailability.
+- **Rationale**: After the outpost/ideate split, spawning via spawn_session as primary creates visible tool-not-found errors on non-outpost installations. Agent tool is the standard mechanism on all installations; spawn_session is an optional enhancement. Q-3 was the last remaining skill file with the inverted ordering.
+- **Source**: archive/cycles/011/decision-log.md D-43; archive/cycles/011/review-manifest.md WI-125
+- **Status**: settled
+
+## D-44: Close Q-27 by generalizing smoke test to a context-appropriate demo heuristic
+- **Decision**: WI-126 replaced the startup-specific smoke test in `agents/code-reviewer.md` with a heuristic: "what would a reasonable person be expected to do to demo the work they just did?" Five example types are enumerated (startup command, CLI --help/--version, library build/test suite, e2e test, config/doc validation). P-22 updated to reference "context-appropriate smoke test" rather than startup command only.
+- **Rationale**: P-22 and the startup-failure exception were inert for library projects, CLI tools, and documentation-only work items that have no meaningful startup step. The demo heuristic generalizes across project types without requiring exhaustive type enumeration.
+- **Source**: archive/cycles/011/decision-log.md D-44; archive/cycles/011/review-manifest.md WI-126
+- **Policy**: P-22 (amended in cycle 011)
+- **Status**: settled
+
+## D-45: Close Q-26 by adding smoke test infrastructure failure handling with regression determination
+- **Decision**: WI-128 added a distinct "Smoke test infrastructure failure" exception to both `skills/execute/SKILL.md` and `skills/brrr/phases/execute.md`, and added P-23 to workflow policies. The protocol requires regression determination before Andon: if the failure is determined to be a regression caused by this work item's changes, diagnose and attempt a surgical fix; if not a regression, route to Andon immediately.
+- **Rationale**: The startup-failure exception covers application failures but not infrastructure failures (runner not found, environment setup error, pre-execution crash). Treating these as identical failure modes was undefined behavior. Regression determination prevents excessive Andon escalations for pre-existing or environmental failures.
+- **Source**: archive/cycles/011/decision-log.md D-45; archive/cycles/011/review-manifest.md WI-128
+- **Policy**: P-23
+- **Status**: settled
+
+## D-46: Close Q-31 by replacing fixable-path prose note with exact quoted journal template
+- **Decision**: WI-127 replaced "Note in the journal as significant rework" in both `skills/execute/SKILL.md:402` and `skills/brrr/phases/execute.md:158` with an exact quoted template: `` `Rework: Startup failure root cause diagnosed and fixed. {brief description of fix}.` ``
+- **Rationale**: The unfixable startup-failure path (WI-124, cycle 010) used an exact quoted template. The fixable path used prose with no template string, creating an asymmetry and a latent journal-parsing risk. The template format mirrors the unfixable-path convention established in cycle 010.
+- **Source**: archive/cycles/011/decision-log.md D-46; archive/cycles/011/review-manifest.md WI-127
+- **Status**: settled
+
+## D-48: Close Q-33 and Q-34 by updating inline prompts and brrr label qualifier
+- **Decision**: WI-129 completed the smoke test generalization by making three string replacements: (1) `skills/execute/SKILL.md:325` inline prompt changed from "cannot build or start" to "smoke test fails"; (2) `skills/brrr/phases/execute.md:113` same replacement; (3) `skills/brrr/phases/execute.md:160` label amended to include "(non-startup-failure, non-infrastructure-failure)" qualifier. All three locations now use language consistent with the generalized agent definition (D-44/WI-126) and the execute skill's label (D-39).
+- **Rationale**: WI-126 (cycle 011) generalized the agent definition but excluded inline prompt fragments by AC-7. The inline prompts retained pre-generalization language, creating contradictory guidance for code-reviewers spawned via execute or brrr. The brrr label lacked the exclusion qualifier present in the execute skill, risking misrouting of startup-failure or infra-failure findings.
+- **Source**: archive/cycles/012/decision-log.md D-48; archive/cycles/012/summary.md
+- **Status**: settled

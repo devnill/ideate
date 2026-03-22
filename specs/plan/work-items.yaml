@@ -1195,3 +1195,145 @@ items:
       - 'skills/brrr/phases/execute.md finding-handling block contains an equivalent exception as the first Critical finding bullet'
       - 'No other sections in either file are modified'
     notes: plan/notes/120.md
+
+  "121":
+    title: Replace startup-failure unconditional-Andon rule with diagnose-and-fix rule
+    complexity: low
+    scope:
+      - {path: skills/execute/SKILL.md, op: modify}
+      - {path: skills/brrr/phases/execute.md, op: modify}
+      - {path: specs/domains/workflow/policies.md, op: modify}
+    depends: []
+    blocks: []
+    criteria:
+      - 'skills/execute/SKILL.md Phase 8 startup-failure exception instructs the executor to diagnose root cause and apply a surgical fix if within scope'
+      - 'skills/execute/SKILL.md Phase 8 startup-failure exception routes to Andon only when the root cause cannot be fixed'
+      - 'The new rule appears before the general fixable-within-scope rule (evaluation order preserved)'
+      - 'skills/brrr/phases/execute.md finding-handling first Critical bullet matches the new diagnose-and-fix behavior'
+      - 'specs/domains/workflow/policies.md P-22 is updated to reflect the new rule (diagnose + surgical fix; Andon only if unfixable)'
+      - 'No other sections in any of the three files are modified'
+    notes: plan/notes/121.md
+
+  "122":
+    title: Fix code-reviewer agent startup-failure description
+    complexity: low
+    scope:
+      - {path: agents/code-reviewer.md, op: modify}
+    depends: []
+    blocks: []
+    criteria:
+      - 'agents/code-reviewer.md line 91 no longer says "treat it as scope-changing — this is an Andon-level issue"'
+      - 'The replacement text correctly describes the diagnose-and-fix protocol: the executor diagnoses the root cause and attempts a surgical fix before routing to Andon if unfixable'
+      - 'The finding title convention ("Startup failure after [work item name]") is preserved unchanged'
+      - 'No other lines in agents/code-reviewer.md are modified'
+    notes: plan/notes/122.md
+
+  "123":
+    title: Amend P-22 to document smoke-test re-run step
+    complexity: low
+    scope:
+      - {path: specs/domains/workflow/policies.md, op: modify}
+    depends: []
+    blocks: []
+    criteria:
+      - 'P-22 body explicitly states that a surgical fix must be followed by a smoke-test re-run'
+      - 'P-22 body explicitly states that a second smoke-test failure classifies the root cause as indeterminate'
+      - 'P-22 heading and all other fields (Derived from, Established, Amended, Status) are preserved'
+      - 'No other policies in the file are modified'
+    notes: plan/notes/123.md
+
+  "124":
+    title: Add journal instruction to unfixable Andon path
+    complexity: low
+    scope:
+      - {path: skills/execute/SKILL.md, op: modify}
+      - {path: skills/brrr/phases/execute.md, op: modify}
+    depends: []
+    blocks: []
+    criteria:
+      - 'skills/execute/SKILL.md Phase 8 unfixable startup-failure path includes an instruction to append diagnostic findings to the journal before routing to Andon'
+      - 'skills/brrr/phases/execute.md unfixable startup-failure path includes an equivalent journal instruction'
+      - 'The journal instruction format mirrors the fixable path (which says "note in the journal as significant rework")'
+      - 'No other sections in either file are modified'
+    notes: plan/notes/124.md
+
+  "125":
+    title: Fix spawn_session ordering in skills/review/SKILL.md
+    complexity: low
+    scope:
+      - {path: skills/review/SKILL.md, op: modify}
+    depends: []
+    blocks: []
+    criteria:
+      - 'skills/review/SKILL.md Phase 4a instruction for spawning review agents presents the Agent tool as the primary mechanism'
+      - 'spawn_session is described as an optional enhancement (for outpost-configured installations), not the primary path'
+      - 'No other lines in skills/review/SKILL.md are modified'
+    notes: plan/notes/125.md
+
+  "126":
+    title: Generalize smoke test concept beyond startup command
+    complexity: medium
+    scope:
+      - {path: agents/code-reviewer.md, op: modify}
+      - {path: skills/execute/SKILL.md, op: modify}
+      - {path: skills/brrr/phases/execute.md, op: modify}
+      - {path: specs/domains/workflow/policies.md, op: modify}
+    depends: []
+    blocks: ["127", "128"]
+    criteria:
+      - 'agents/code-reviewer.md Dynamic Testing Step 2 smoke test description includes the context-appropriate heuristic ("what would a reasonable person do to demo this work?")'
+      - 'agents/code-reviewer.md lists startup command, e2e test, build success, and relevant test suite as example smoke test types'
+      - 'skills/execute/SKILL.md Phase 8 startup-failure exception uses "smoke test" language without restricting it to startup commands'
+      - 'skills/brrr/phases/execute.md finding-handling Critical bullet uses the same generalized smoke test language'
+      - 'specs/domains/workflow/policies.md P-22 references "context-appropriate smoke test" rather than only startup command'
+      - 'No other sections in any of the four files are modified'
+    notes: plan/notes/126.md
+
+  "127":
+    title: Add quoted template to fixable-path journal note
+    complexity: low
+    scope:
+      - {path: skills/execute/SKILL.md, op: modify}
+      - {path: skills/brrr/phases/execute.md, op: modify}
+    depends: ["126"]
+    blocks: []
+    criteria:
+      - 'skills/execute/SKILL.md Phase 8 startup-failure step 2 (fixable path) contains a quoted journal template matching the style of step 3''s template'
+      - 'The template format is: `Rework: Startup failure root cause diagnosed and fixed. {brief description of fix}.`'
+      - 'skills/brrr/phases/execute.md finding-handling fixable-path branch contains an equivalent quoted template'
+      - 'No other sections in either file are modified'
+    notes: plan/notes/127.md
+
+  "128":
+    title: Add smoke test infrastructure failure handling
+    complexity: medium
+    scope:
+      - {path: skills/execute/SKILL.md, op: modify}
+      - {path: skills/brrr/phases/execute.md, op: modify}
+      - {path: specs/domains/workflow/policies.md, op: modify}
+    depends: ["126"]
+    blocks: []
+    criteria:
+      - 'skills/execute/SKILL.md Phase 8 contains a named exception for "Smoke test infrastructure failure" distinct from the startup-failure exception'
+      - 'The infra-failure exception instructs the executor to determine if the failure is a regression caused by this work item'
+      - 'If regression: diagnose, attempt careful surgical fix (no scope expansion, no architectural decisions), re-run smoke test, Andon if still fails'
+      - 'If not a regression: route to Andon cord immediately with journal note'
+      - 'skills/brrr/phases/execute.md finding-handling contains an equivalent infra-failure bullet'
+      - 'specs/domains/workflow/policies.md P-22 or a new P-23 captures the infra-failure regression-check rule'
+      - 'No other sections in any of the three files are modified'
+    notes: plan/notes/128.md
+
+  "129":
+    title: Fix inline prompt smoke test condition and brrr label consistency
+    complexity: low
+    scope:
+      - {path: skills/execute/SKILL.md, op: modify}
+      - {path: skills/brrr/phases/execute.md, op: modify}
+    depends: []
+    blocks: []
+    criteria:
+      - 'skills/execute/SKILL.md line 325 inline prompt reads "If the smoke test fails, report a Critical finding titled \"Startup failure after [work item name]\"." (was "If the project cannot build or start")'
+      - 'skills/brrr/phases/execute.md line 113 inline prompt has the identical replacement'
+      - 'skills/brrr/phases/execute.md line 160 reads "**Critical findings fixable within scope (non-startup-failure, non-infrastructure-failure)**:" (qualifier added)'
+      - 'No other lines in either file are modified'
+    notes: plan/notes/129.md
