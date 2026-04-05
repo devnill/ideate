@@ -82,6 +82,31 @@ function substituteVariables(
 }
 
 // ---------------------------------------------------------------------------
+// Command allowlist
+// ---------------------------------------------------------------------------
+
+/** Commands permitted for hook execution. Any command not in this set is rejected. */
+const ALLOWLISTED_COMMANDS = new Set([
+  "git",
+  "node",
+  "npm",
+  "npx",
+  "echo",
+  "cat",
+  "ls",
+]);
+
+/**
+ * Validate that a command is in the allowlist.
+ * Returns the command if allowed, null otherwise.
+ */
+function validateCommand(command: string): string | null {
+  // Strip path prefix if present (e.g., /usr/bin/git -> git)
+  const baseCommand = command.replace(/^.*[/\\]/, "");
+  return ALLOWLISTED_COMMANDS.has(baseCommand) ? baseCommand : null;
+}
+
+// ---------------------------------------------------------------------------
 // Command parsing helper
 // ---------------------------------------------------------------------------
 
@@ -177,12 +202,25 @@ export function dispatchHook(
     return "";
   }
 
+  // Validate command against allowlist
+  const allowedCommand = validateCommand(parsed.command);
+  if (!allowedCommand) {
+    console.error(
+      `[ideate:hooks] Hook rejected: command "${parsed.command}" is not in allowlist. ` +
+      `Allowed commands: ${Array.from(ALLOWLISTED_COMMANDS).join(", ")}`
+    );
+    throw new Error(
+      `Command "${parsed.command}" is not allowlisted for hook execution`
+    );
+  }
+
   // Apply variable substitution to each argument separately
   // This ensures variables cannot inject shell metacharacters
   const substitutedArgs = parsed.args.map(arg => substituteVariables(arg, variables));
 
   // Use spawnSync with explicit argument array - no shell interpretation
-  const result = spawnSync(parsed.command, substitutedArgs, {
+  // Use the validated command name (without path) for security
+  const result = spawnSync(allowedCommand, substitutedArgs, {
     timeout: 30_000,
     encoding: "utf8",
     shell: false,

@@ -102,6 +102,8 @@ export interface TraversalOptions {
   token_budget?: number;
   /** Node types to always include regardless of PPR score. */
   always_include_types?: NodeType[];
+  /** Maximum number of nodes to process in PPR. If graph exceeds this, returns empty result. Default: 10000. */
+  max_nodes?: number;
 }
 
 export interface TraversalResult {

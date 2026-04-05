@@ -169,6 +169,7 @@ export class LocalContextAdapter {
       edge_type_weights: edgeTypeWeights,
       token_budget: tokenBudget = 50000,
       always_include_types: alwaysIncludeTypes = [],
+      max_nodes: maxNodes,
     } = options;
 
     // Run PPR algorithm (ppr.ts is an adapter-internal dependency)
@@ -177,6 +178,7 @@ export class LocalContextAdapter {
       maxIterations,
       convergenceThreshold,
       edgeTypeWeights,
+      maxNodes,
     });
 
     // Build a map of nodeId → PPR score

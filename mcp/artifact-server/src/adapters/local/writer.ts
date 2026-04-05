@@ -464,10 +464,11 @@ export class LocalWriterAdapter {
       // Journal entries: J-{cycleStr}-{seqStr}
       const cycleNum = cycle ?? 0;
       const cycleStr = String(cycleNum).padStart(3, "0");
-      const seqRow = this.db.prepare(
-        `SELECT COUNT(*) as cnt FROM nodes WHERE type = 'journal_entry' AND cycle_created = ?`
-      ).get(cycleNum) as { cnt: number };
-      const seq = seqRow?.cnt ?? 0;
+      // Use MAX+1 strategy (not COUNT) to handle gaps from deleted entries
+      const maxRow = this.db.prepare(
+        `SELECT MAX(CAST(SUBSTR(id, ?) AS INTEGER)) as max_num FROM nodes WHERE id LIKE ?`
+      ).get(`J-${cycleStr}-`.length + 1, `J-${cycleStr}-%`) as { max_num: number | null };
+      const seq = (maxRow?.max_num ?? 0) + 1;
       return `J-${cycleStr}-${String(seq).padStart(3, "0")}`;
     }
 
@@ -482,10 +483,11 @@ export class LocalWriterAdapter {
     if (type === "finding") {
       const cycleNum = cycle ?? 0;
       const cycleStr = String(cycleNum).padStart(3, "0");
+      // Use MAX+1 strategy (not COUNT) to handle gaps from deleted entries
       const maxRow = this.db.prepare(
-        `SELECT COUNT(*) as cnt FROM nodes WHERE type = 'finding' AND cycle_created = ?`
-      ).get(cycleNum) as { cnt: number };
-      const seq = (maxRow?.cnt ?? 0) + 1;
+        `SELECT MAX(CAST(SUBSTR(id, ?) AS INTEGER)) as max_num FROM nodes WHERE id LIKE ?`
+      ).get(`F-${cycleStr}-`.length + 1, `F-${cycleStr}-%`) as { max_num: number | null };
+      const seq = (maxRow?.max_num ?? 0) + 1;
       return `F-${cycleStr}-${String(seq).padStart(3, "0")}`;
     }
 
@@ -978,6 +980,17 @@ export class LocalWriterAdapter {
       return { results: [], errors };
     }
 
+    // ---------- Check node existence before transaction (for created/updated status) ----------
+    const existingNodes = new Set<string>();
+    for (const node of resolvedNodes) {
+      const existingRow = this.db.prepare(
+        `SELECT id FROM nodes WHERE id = ?`
+      ).get(node.resolvedId) as { id: string } | undefined;
+      if (existingRow) {
+        existingNodes.add(node.resolvedId);
+      }
+    }
+
     // ---------- Phase 2: SQLite upserts in a single exclusive transaction ----------
     const fkWasOn = this.db.pragma("foreign_keys", { simple: true }) as number;
     if (fkWasOn) this.db.pragma("foreign_keys = OFF");
@@ -1040,9 +1053,10 @@ export class LocalWriterAdapter {
       if (fkWasOn) this.db.pragma("foreign_keys = ON");
     }
 
-    // Build results
+    // Build results with correct created/updated status
     for (const node of resolvedNodes) {
-      results.push({ id: node.resolvedId, status: "created" });
+      const status = existingNodes.has(node.resolvedId) ? "updated" : "created";
+      results.push({ id: node.resolvedId, status });
     }
 
     return { results, errors };
@@ -1157,26 +1171,42 @@ export class LocalWriterAdapter {
       return `Error during cycle archival verification — no originals deleted:\n${verifyErrors.join("\n")}`;
     }
 
-    // Phase 3: Delete originals
-    for (const srcPath of incrementalFiles) {
-      fs.unlinkSync(srcPath);
-    }
-    for (const { src: srcPath } of workItemFiles) {
-      if (fs.existsSync(srcPath)) fs.unlinkSync(srcPath);
-    }
-
-    // Phase 3b: Update SQLite index
+    // Phase 3: Atomic commit — delete originals and update SQLite index in transaction.
+    // If anything fails, clean up copied archive files to leave system consistent.
     const deleteStmt = this.db.prepare(`DELETE FROM nodes WHERE file_path = ?`);
     const updatePathStmt = this.db.prepare(`UPDATE nodes SET file_path = ? WHERE file_path = ?`);
-    this.db.transaction(() => {
-      for (const srcPath of incrementalFiles) {
-        deleteStmt.run(srcPath);
+
+    try {
+      this.db.transaction(() => {
+        // Delete original incremental files
+        for (const srcPath of incrementalFiles) {
+          fs.unlinkSync(srcPath);
+        }
+        // Delete original work item files
+        for (const { src: srcPath } of workItemFiles) {
+          if (fs.existsSync(srcPath)) fs.unlinkSync(srcPath);
+        }
+        // Update SQLite index to reflect new paths
+        for (const srcPath of incrementalFiles) {
+          deleteStmt.run(srcPath);
+        }
+        for (const { src: srcPath, name } of workItemFiles) {
+          const archivePath = path.join(cycleWorkItemsDir, name);
+          updatePathStmt.run(archivePath, srcPath);
+        }
+      }).exclusive();
+    } catch (err) {
+      // Rollback: remove copied archive files on transaction failure
+      for (const { dst } of copied) {
+        try {
+          if (fs.existsSync(dst)) fs.unlinkSync(dst);
+        } catch {
+          // Best-effort cleanup
+        }
       }
-      for (const { src: srcPath, name } of workItemFiles) {
-        const archivePath = path.join(cycleWorkItemsDir, name);
-        updatePathStmt.run(archivePath, srcPath);
-      }
-    }).exclusive();
+      const message = err instanceof Error ? err.message : String(err);
+      return `Error during cycle archival — transaction rolled back: ${message}`;
+    }
 
     const workItemCount = workItemFiles.length;
     const incrementalCount = incrementalFiles.length;
@@ -1238,11 +1268,11 @@ export class LocalWriterAdapter {
 
     try {
       entryId = this.db.transaction(() => {
-        // Count existing journal entries for this cycle to get next sequence number
-        const seqRow = this.db.prepare(
-          `SELECT COUNT(*) as cnt FROM nodes WHERE type = 'journal_entry' AND cycle_created = ?`
-        ).get(cycleNumber) as { cnt: number };
-        const seq = seqRow?.cnt ?? 0;
+        // Use MAX+1 strategy (not COUNT) to get next sequence number
+        const maxRow = this.db.prepare(
+          `SELECT MAX(CAST(SUBSTR(id, ?) AS INTEGER)) as max_num FROM nodes WHERE id LIKE ?`
+        ).get(`J-${cycleStr}-`.length + 1, `J-${cycleStr}-%`) as { max_num: number | null };
+        const seq = (maxRow?.max_num ?? 0) + 1;
         const seqStr = String(seq).padStart(3, "0");
         const id = `J-${cycleStr}-${seqStr}`;
 

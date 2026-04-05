@@ -326,12 +326,20 @@ export class LocalReaderAdapter {
         .all(id, id) as EdgeRow[];
     }
 
-    return rows.map((r) => ({
-      source_id: r.source_id,
-      target_id: r.target_id,
-      edge_type: r.edge_type as EdgeType,
-      properties: r.props ? (JSON.parse(r.props) as Record<string, unknown>) : {},
-    }));
+    // Filter out containment edges (organizational hierarchy) - matches server-side behavior
+    const CONTAINMENT_EDGE_TYPES = new Set([
+      "owns_codebase", "owns_project", "has_phase", "has_work_item",
+      "owns_knowledge", "references_codebase",
+    ]);
+
+    return rows
+      .filter((r) => !CONTAINMENT_EDGE_TYPES.has(r.edge_type))
+      .map((r) => ({
+        source_id: r.source_id,
+        target_id: r.target_id,
+        edge_type: r.edge_type as EdgeType,
+        properties: r.props ? (JSON.parse(r.props) as Record<string, unknown>) : {},
+      }));
   }
 
   // -----------------------------------------------------------------------
@@ -355,10 +363,6 @@ export class LocalReaderAdapter {
     if (filter.status) {
       whereClauses.push("n.status = ?");
       params.push(filter.status);
-    } else if (type === "work_item") {
-      whereClauses.push(
-        "(n.status IS NULL OR (n.status != 'done' AND n.status != 'obsolete'))"
-      );
     }
 
     let summaryExpr = "NULL";
@@ -485,10 +489,20 @@ export class LocalReaderAdapter {
 
     const edgeTypeParams = edge_types ?? [];
 
+    // Containment edge types to exclude (matches server-side behavior)
+    const CONTAINMENT_EDGE_TYPES = ["owns_codebase", "owns_project", "has_phase", "has_work_item", "owns_knowledge", "references_codebase"];
+    const containmentEdgeParams = [...CONTAINMENT_EDGE_TYPES];
+
     function buildEdgeFilter(alias: string): string {
-      if (!edge_types || edge_types.length === 0) return "";
-      const placeholders = edge_types.map(() => "?").join(", ");
-      return `AND ${alias}.edge_type IN (${placeholders})`;
+      const filters: string[] = [];
+      if (edge_types && edge_types.length > 0) {
+        const placeholders = edge_types.map(() => "?").join(", ");
+        filters.push(`AND ${alias}.edge_type IN (${placeholders})`);
+      }
+      // Always exclude containment edges
+      const containmentPlaceholders = CONTAINMENT_EDGE_TYPES.map(() => "?").join(", ");
+      filters.push(`AND ${alias}.edge_type NOT IN (${containmentPlaceholders})`);
+      return filters.join(" ");
     }
 
     let baseSql: string;
@@ -503,7 +517,7 @@ export class LocalReaderAdapter {
           JOIN nodes n ON n.id = e.target_id
           WHERE e.source_id = ? ${edgeTypeFilter}
         `;
-        baseParams = [origin_id, ...edgeTypeParams];
+        baseParams = [origin_id, ...edgeTypeParams, ...containmentEdgeParams];
       } else if (direction === "incoming") {
         baseSql = `
           SELECT n.id AS node_id, n.type, e.edge_type, 'incoming' AS direction, 1 AS depth, n.status, n.cycle_created, n.cycle_modified, n.content_hash, n.token_count
@@ -511,7 +525,7 @@ export class LocalReaderAdapter {
           JOIN nodes n ON n.id = e.source_id
           WHERE e.target_id = ? ${edgeTypeFilter}
         `;
-        baseParams = [origin_id, ...edgeTypeParams];
+        baseParams = [origin_id, ...edgeTypeParams, ...containmentEdgeParams];
       } else {
         baseSql = `
           SELECT n.id AS node_id, n.type, e.edge_type, 'outgoing' AS direction, 1 AS depth, n.status, n.cycle_created, n.cycle_modified, n.content_hash, n.token_count
@@ -524,7 +538,7 @@ export class LocalReaderAdapter {
           JOIN nodes n ON n.id = e.source_id
           WHERE e.target_id = ? ${edgeTypeFilter}
         `;
-        baseParams = [origin_id, ...edgeTypeParams, origin_id, ...edgeTypeParams];
+        baseParams = [origin_id, ...edgeTypeParams, ...containmentEdgeParams, origin_id, ...edgeTypeParams, ...containmentEdgeParams];
       }
     } else {
       // Recursive CTE for depth > 1
@@ -551,14 +565,14 @@ export class LocalReaderAdapter {
           UNION
           ${outgoingStep}
         `;
-        baseParams = [origin_id, ...edgeTypeParams, depth];
+        baseParams = [origin_id, ...edgeTypeParams, ...containmentEdgeParams, depth];
       } else if (direction === "incoming") {
         recursiveBody = `
           SELECT ? AS node_id, '' AS edge_type, '' AS direction, 0 AS depth
           UNION
           ${incomingStep}
         `;
-        baseParams = [origin_id, ...edgeTypeParams, depth];
+        baseParams = [origin_id, ...edgeTypeParams, ...containmentEdgeParams, depth];
       } else {
         recursiveBody = `
           SELECT ? AS node_id, '' AS edge_type, '' AS direction, 0 AS depth
@@ -567,7 +581,7 @@ export class LocalReaderAdapter {
           UNION
           ${incomingStep}
         `;
-        baseParams = [origin_id, ...edgeTypeParams, depth, ...edgeTypeParams, depth];
+        baseParams = [origin_id, ...edgeTypeParams, ...containmentEdgeParams, depth, ...edgeTypeParams, ...containmentEdgeParams, depth];
       }
 
       baseSql = `

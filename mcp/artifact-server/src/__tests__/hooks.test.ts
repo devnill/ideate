@@ -243,8 +243,8 @@ describe("fireEvent — filters by event name", () => {
     const markerPlan = path.join(tmpDir, "plan-marker.txt");
     const markerWi = path.join(tmpDir, "wi-marker.txt");
     writeHooks([
-      { event: "plan.complete", type: "command", value: `touch ${markerPlan}`, enabled: true },
-      { event: "work_item.started", type: "command", value: `touch ${markerWi}`, enabled: true },
+      { event: "plan.complete", type: "command", value: `node -e "require('fs').writeFileSync('${markerPlan}', 'marked')"`, enabled: true },
+      { event: "work_item.started", type: "command", value: `node -e "require('fs').writeFileSync('${markerWi}', 'marked')"`, enabled: true },
     ]);
 
     fireEvent(ideateDir(), "plan.complete", {});
@@ -258,7 +258,7 @@ describe("fireEvent — filters by event name", () => {
   it("does nothing when no hooks match the event name", () => {
     const marker = path.join(tmpDir, "no-match-marker.txt");
     writeHooks([
-      { event: "plan.complete", type: "command", value: `touch ${marker}`, enabled: true },
+      { event: "plan.complete", type: "command", value: `node -e "require('fs').writeFileSync('${marker}', 'marked')"`, enabled: true },
     ]);
     fireEvent(ideateDir(), "work_item.started", {});
     expect(fs.existsSync(marker)).toBe(false);
@@ -276,7 +276,7 @@ describe("fireEvent — disabled hooks are skipped", () => {
   it("does not execute disabled hooks", () => {
     const marker = path.join(tmpDir, "disabled-marker.txt");
     writeHooks([
-      { event: "plan.complete", type: "command", value: `touch ${marker}`, enabled: false },
+      { event: "plan.complete", type: "command", value: `node -e "require('fs').writeFileSync('${marker}', 'marked')"`, enabled: false },
     ]);
     fireEvent(ideateDir(), "plan.complete", {});
     expect(fs.existsSync(marker)).toBe(false);
@@ -287,8 +287,8 @@ describe("fireEvent — error handling", () => {
   it("catches errors from individual hooks without stopping remaining hooks", () => {
     const marker = path.join(tmpDir, "second-hook-marker.txt");
     writeHooks([
-      { event: "plan.complete", type: "command", value: "exit 1", enabled: true },
-      { event: "plan.complete", type: "command", value: `touch ${marker}`, enabled: true },
+      { event: "plan.complete", type: "command", value: 'node -e "process.exit(1)"', enabled: true },
+      { event: "plan.complete", type: "command", value: `node -e "require('fs').writeFileSync('${marker}', 'marked')"`, enabled: true },
     ]);
     // Should not throw even though the first hook fails
     expect(() => {
@@ -318,7 +318,7 @@ describe("fireEvent — error handling", () => {
       {
         event: "work_item.completed",
         type: "command",
-        value: `touch ${marker}`,
+        value: `node -e "require('fs').writeFileSync('${marker}', 'marked')"`,
         enabled: true,
       },
     ]);

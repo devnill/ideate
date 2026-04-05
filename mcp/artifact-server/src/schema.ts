@@ -63,9 +63,9 @@ export const EDGE_TYPE_REGISTRY: Record<EdgeType, EdgeTypeSpec> = {
     yaml_field: "module",
   },
   belongs_to_domain: {
-    description: "Artifact belongs to a named domain",
+    description: "Artifact belongs to a named domain. Target is the domain name string (e.g., 'workflow'), not a node ID. Empty target_types because validation is by domain name, not node type.",
     source_types: ["work_item", "domain_policy", "domain_decision", "domain_question"],
-    target_types: ["domain"],
+    target_types: [], // Domain names are strings, not node IDs — no node type validation
     yaml_field: "domain",
   },
   derived_from: {

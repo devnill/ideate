@@ -35,6 +35,8 @@ export interface PPROptions {
    * Edges with unlisted types get weight 1.0.
    */
   edgeTypeWeights?: Record<string, number>;
+  /** Maximum number of nodes to process. If graph exceeds this, returns empty result with warning. Default: 10000 */
+  maxNodes?: number;
 }
 
 export interface PPRResult {
@@ -58,6 +60,12 @@ const DEFAULT_EDGE_TYPE_WEIGHTS: Record<string, number> = {
   blocks: 0.3,
 };
 
+/** Containment edge types excluded from PPR traversal. */
+const CONTAINMENT_EDGE_TYPES = new Set([
+  "owns_codebase", "owns_project", "has_phase", "has_work_item",
+  "owns_knowledge", "references_codebase",
+]);
+
 // ---------------------------------------------------------------------------
 // computePPR
 // ---------------------------------------------------------------------------
@@ -79,6 +87,7 @@ export function computePPR(
   const maxIterations = options?.maxIterations ?? DEFAULT_MAX_ITERATIONS;
   const convergenceThreshold = options?.convergenceThreshold ?? DEFAULT_CONVERGENCE_THRESHOLD;
   const edgeTypeWeights: Record<string, number> = options?.edgeTypeWeights ?? DEFAULT_EDGE_TYPE_WEIGHTS;
+  const maxNodes = options?.maxNodes ?? 10000;
 
   // Short-circuit: empty seeds → empty result
   if (seedNodeIds.length === 0) {
@@ -118,6 +127,15 @@ export function computePPR(
   const allNodeIds = Array.from(nodeSet);
   const totalNodes = allNodeIds.length;
 
+  // Check maxNodes limit
+  if (totalNodes > maxNodes) {
+    console.warn(
+      `[PPR] Graph size (${totalNodes} nodes) exceeds maxNodes limit (${maxNodes}). ` +
+      `Returning empty result to prevent resource exhaustion.`
+    );
+    return [];
+  }
+
   // adj: undirected adjacency — for each node, the list of weighted neighbours
   const adj = new Map<string, Array<{ neighbour: string; weight: number }>>();
   for (const id of allNodeIds) {
@@ -131,6 +149,9 @@ export function computePPR(
   }
 
   for (const e of allEdges) {
+    // Skip containment edges (organizational hierarchy)
+    if (CONTAINMENT_EDGE_TYPES.has(e.edge_type)) continue;
+
     const w = edgeTypeWeights[e.edge_type] ?? 1.0;
 
     // Skip edges with zero weight — they contribute nothing to score propagation

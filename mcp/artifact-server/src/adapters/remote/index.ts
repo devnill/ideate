@@ -98,7 +98,16 @@ const FIELD_FALLBACKS: Record<string, Record<string, string[]>> = {
     project: ["project_id"], // doc.project ?? doc.project_id
   },
   metrics_event: {
-    event_name: ["agent_type"], // doc.event_name ?? doc.agent_type
+    // T-13: indexer uses ?? '' chain; we apply same fallback here for putNode parity
+    // event_name: null + agent_type: "reviewer" => "reviewer"
+    // event_name: null + agent_type: null => "" (empty string per SQLite NOT NULL)
+    event_name: ["agent_type", ""],
+  },
+  journal_entry: {
+    // Server stores skill/entry_type/body; LocalAdapter expects phase/title/content
+    phase: ["skill"],
+    title: ["entry_type"],
+    content: ["body"],
   },
 };
 
@@ -156,17 +165,30 @@ function mapGqlNodeToNode(gql: GqlArtifactNode): Node {
           const contentObj = parsed as Record<string, unknown>;
 
           // Apply indexer field-name fallbacks (matches buildExtensionRow in indexer.ts)
+          // T-13: handles ?? '' pattern for NOT NULL columns (e.g., metrics_events.event_name)
           const fallbacks = FIELD_FALLBACKS[artifactType];
           if (fallbacks) {
             for (const [target, sources] of Object.entries(fallbacks)) {
-              // Match indexer's toStrOrNull(x) ?? toStrOrNull(y) pattern:
+              // Match indexer's toStrOrNull(x) ?? toStrOrNull(y) ?? ... pattern:
               // if target is absent, undefined, or null, try fallback sources
               if (contentObj[target] === undefined || contentObj[target] === null) {
+                let fallbackApplied = false;
                 for (const src of sources) {
-                  if (src in contentObj && contentObj[src] !== undefined && contentObj[src] !== null) {
-                    contentObj[target] = contentObj[src];
+                  // T-13: empty string literal means "use empty string as final fallback"
+                  if (src === "") {
+                    contentObj[target] = "";
+                    fallbackApplied = true;
                     break;
                   }
+                  if (src in contentObj && contentObj[src] !== undefined && contentObj[src] !== null) {
+                    contentObj[target] = contentObj[src];
+                    fallbackApplied = true;
+                    break;
+                  }
+                }
+                // Ensure target exists even if no fallback was found (shouldn't happen with ["", ...])
+                if (!fallbackApplied && !(target in contentObj)) {
+                  contentObj[target] = null;
                 }
               }
             }
@@ -893,9 +915,22 @@ export class RemoteAdapter implements StorageAdapter {
       findings_by_severity[gc.key] = gc.count;
     }
 
+    // Parse the content JSON blob to extract inner content field (S8 fix)
+    let cycle_summary_content: string | null = null;
+    const rawContent = data.convergenceStatus.cycleSummaryContent;
+    if (rawContent != null) {
+      try {
+        const parsed = JSON.parse(rawContent) as Record<string, unknown>;
+        cycle_summary_content = typeof parsed.content === 'string' ? parsed.content : rawContent;
+      } catch {
+        // Not valid JSON, use raw content
+        cycle_summary_content = rawContent;
+      }
+    }
+
     return {
       findings_by_severity,
-      cycle_summary_content: data.convergenceStatus.cycleSummaryContent,
+      cycle_summary_content,
     };
   }
 

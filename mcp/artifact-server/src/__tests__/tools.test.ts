@@ -1121,11 +1121,11 @@ describe("handleAppendJournal", () => {
       cycle_number: 3,
     });
 
-    // Result should reference the journal entry ID
-    expect(result).toContain("J-003-000");
+    // Result should reference the journal entry ID (1-based indexing per S10/P2)
+    expect(result).toContain("J-003-001");
 
     // The YAML file should exist under cycles/003/journal/
-    const yamlPath = path.join(artifactDir, "cycles", "003", "journal", "J-003-000.yaml");
+    const yamlPath = path.join(artifactDir, "cycles", "003", "journal", "J-003-001.yaml");
     expect(fs.existsSync(yamlPath)).toBe(true);
 
     const content = fs.readFileSync(yamlPath, "utf8");
@@ -1154,13 +1154,14 @@ describe("handleAppendJournal", () => {
     const journalDir = path.join(artifactDir, "cycles", "003", "journal");
     const files = fs.readdirSync(journalDir).filter((f) => f.endsWith(".yaml"));
     expect(files).toHaveLength(2);
-    expect(files).toContain("J-003-000.yaml");
+    // 1-based indexing per S10/P2 fix
     expect(files).toContain("J-003-001.yaml");
+    expect(files).toContain("J-003-002.yaml");
 
-    const first = fs.readFileSync(path.join(journalDir, "J-003-000.yaml"), "utf8");
+    const first = fs.readFileSync(path.join(journalDir, "J-003-001.yaml"), "utf8");
     expect(first).toContain("cycle-start");
 
-    const second = fs.readFileSync(path.join(journalDir, "J-003-001.yaml"), "utf8");
+    const second = fs.readFileSync(path.join(journalDir, "J-003-002.yaml"), "utf8");
     expect(second).toContain("work-item-complete");
   });
 
@@ -2645,7 +2646,8 @@ describe("integration: append_journal → artifact_query sync", () => {
       .prepare(`SELECT file_path FROM nodes WHERE type = 'journal_entry' LIMIT 1`)
       .get() as { file_path: string } | undefined;
     expect(row).toBeDefined();
-    expect(row!.file_path).toContain("J-003-000.yaml");
+    // 1-based indexing per S10/P2 fix
+    expect(row!.file_path).toContain("J-003-001.yaml");
     expect(row!.file_path).not.toContain("journal.md");
   });
 });

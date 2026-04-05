@@ -133,10 +133,96 @@ export class GraphQLClient {
     return this.execute<T>(document, variables);
   }
 
+  // Retry configuration
+  private readonly MAX_RETRIES = 3;
+  private readonly INITIAL_RETRY_DELAY_MS = 1000;
+  private readonly MAX_RETRY_DELAY_MS = 8000;
+
   /**
-   * Internal: execute a GraphQL operation (query or mutation).
+   * Determine if an error is retryable (transient).
+   * Network errors, timeouts, and 5xx HTTP status codes are retryable.
+   * 4xx client errors are not retryable.
+   */
+  private isRetryableError(error: unknown): boolean {
+    if (error instanceof ConnectionError) {
+      // Network errors and connection failures are retryable
+      return true;
+    }
+    if (error instanceof StorageAdapterError) {
+      const code = error.code;
+      // Retry on server errors and transient conditions
+      if (code === "INTERNAL_SERVER_ERROR" || code === "SERVICE_UNAVAILABLE" || code === "TIMEOUT") {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Calculate delay for exponential backoff with jitter.
+   * Delays: 1s, 2s, 4s, capped at 8s.
+   */
+  private getRetryDelay(attempt: number): number {
+    const exponentialDelay = this.INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt - 1);
+    const cappedDelay = Math.min(exponentialDelay, this.MAX_RETRY_DELAY_MS);
+    // Add jitter: ±25% to avoid thundering herd
+    const jitter = cappedDelay * 0.25 * (Math.random() * 2 - 1);
+    return Math.floor(cappedDelay + jitter);
+  }
+
+  /**
+   * Internal: execute a GraphQL operation (query or mutation) with retry logic.
    */
   private async execute<T>(
+    document: string,
+    variables?: Record<string, unknown>
+  ): Promise<T> {
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= this.MAX_RETRIES; attempt++) {
+      try {
+        const result = await this.executeOnce<T>(document, variables);
+        // Log successful retry if this wasn't the first attempt
+        if (attempt > 1) {
+          console.error(`[GraphQLClient] Request succeeded on attempt ${attempt}/${this.MAX_RETRIES}`);
+        }
+        return result;
+      } catch (err) {
+        lastError = err;
+
+        // Don't retry non-transient errors
+        if (!this.isRetryableError(err)) {
+          throw err;
+        }
+
+        // Don't retry if this was the last attempt
+        if (attempt >= this.MAX_RETRIES) {
+          console.error(`[GraphQLClient] Request failed after ${this.MAX_RETRIES} attempts`);
+          throw err;
+        }
+
+        // Calculate and apply backoff delay
+        const delay = this.getRetryDelay(attempt);
+        console.error(`[GraphQLClient] Attempt ${attempt}/${this.MAX_RETRIES} failed, retrying in ${delay}ms...`);
+        await this.sleep(delay);
+      }
+    }
+
+    // This should never be reached due to the throw above, but TypeScript needs it
+    throw lastError;
+  }
+
+  /**
+   * Sleep for a given number of milliseconds.
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Internal: execute a single GraphQL operation (query or mutation) without retry.
+   */
+  private async executeOnce<T>(
     document: string,
     variables?: Record<string, unknown>
   ): Promise<T> {
@@ -159,9 +245,18 @@ export class GraphQLClient {
     }
 
     if (!response.ok) {
-      throw new ConnectionError(
-        `GraphQL endpoint returned HTTP ${response.status}: ${response.statusText}`
-      );
+      // 5xx errors are retryable, 4xx errors are not
+      if (response.status >= 500 && response.status < 600) {
+        throw new ConnectionError(
+          `GraphQL endpoint returned HTTP ${response.status}: ${response.statusText}`
+        );
+      } else {
+        // 4xx errors are client errors, not retryable
+        throw new StorageAdapterError(
+          `GraphQL endpoint returned HTTP ${response.status}: ${response.statusText}`,
+          `HTTP_${response.status}`
+        );
+      }
     }
 
     let body: GraphQLResponse<T>;
