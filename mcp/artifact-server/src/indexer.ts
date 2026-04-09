@@ -658,6 +658,22 @@ export function indexFiles(
     if (fkWasOn) db.pragma('foreign_keys = ON');
   }
 
+  // Re-derive journal entry edges when journal entries, cycle_summaries, or
+  // work_items change — all three are upstream inputs to the derivation phases.
+  // Journal entries: /cycles/{NNN}/journal/*.yaml
+  // Cycle summaries: /cycles/{NNN}/*.yaml (excludes journal/ subdirectory)
+  // Work items: /work-items/WI-{NNN}.yaml
+  const hasDerivedEdgeUpdate = yamlPaths.some(
+    p =>
+      /\/cycles\/\d+\/journal\//.test(p) ||
+      /\/cycles\/\d+\/(?!journal)[^/]+\.yaml$/.test(p) ||
+      /\/work-items\/WI-\d+\.yaml$/.test(p)
+  );
+  if (hasDerivedEdgeUpdate) {
+    db.transaction(() => { deriveJournalEntryEdges(drizzleDb); })();
+    db.transaction(() => { deriveJournalEntryCycleEdges(drizzleDb); })();
+  }
+
   return result;
 }
 
@@ -697,6 +713,75 @@ export function removeFiles(
   }
 
   return { removed };
+}
+
+// ---------------------------------------------------------------------------
+// Derived edge: journal_entry → work_item (relates_to)
+// ---------------------------------------------------------------------------
+
+/**
+ * Derives `relates_to` edges for all journal entries that reference a work item.
+ *
+ * For each journal entry with a non-null `work_item` field, inserts a
+ * `relates_to` edge from the journal entry to the work item, but only when
+ * the target work_item node already exists in the graph.  This ensures that
+ * when a work item is added incrementally (via indexFiles), any journal
+ * entries that were indexed before it become properly connected.
+ *
+ * Uses delete-before-insert so that calling this function multiple times on
+ * the same data is idempotent (P-67).  Only the `relates_to` edges whose
+ * targets are work_item nodes are deleted — other edge types are preserved.
+ *
+ * @returns number of edges created
+ */
+export function deriveJournalEntryEdges(drizzleDb: DrizzleDb): number {
+  let edgesCreated = 0;
+
+  // Fetch all journal_entry rows that have a work_item reference
+  const entries = drizzleDb
+    .select({ id: dbSchema.journalEntries.id, work_item: dbSchema.journalEntries.work_item })
+    .from(dbSchema.journalEntries)
+    .all()
+    .filter(e => e.work_item != null && e.work_item.trim() !== "");
+
+  for (const entry of entries) {
+    const workItemId = entry.work_item!.trim();
+
+    // Delete stale relates_to edges targeting a work_item before re-deriving (P-67).
+    drizzleDb
+      .delete(dbSchema.edges)
+      .where(
+        and(
+          eq(dbSchema.edges.source_id, entry.id),
+          eq(dbSchema.edges.edge_type, "relates_to")
+        )
+      )
+      .run();
+
+    // Only create the edge if the target work_item node exists in the graph.
+    const target = drizzleDb
+      .select({ id: dbSchema.nodes.id })
+      .from(dbSchema.nodes)
+      .where(
+        and(
+          eq(dbSchema.nodes.id, workItemId),
+          eq(dbSchema.nodes.type, "work_item")
+        )
+      )
+      .get();
+
+    if (target) {
+      insertEdge(drizzleDb, {
+        source_id: entry.id,
+        target_id: workItemId,
+        edge_type: "relates_to",
+        props: null,
+      });
+      edgesCreated++;
+    }
+  }
+
+  return edgesCreated;
 }
 
 // ---------------------------------------------------------------------------
@@ -849,6 +934,7 @@ export function rebuildIndex(db: Database.Database, drizzleDb: DrizzleDb, ideate
   // Runs outside a transaction since it is read-heavy and self-contained.
   const derivedEdges = deriveJournalEntryCycleEdges(drizzleDb);
   stats.edges_created += derivedEdges;
+  stats.edges_created += deriveJournalEntryEdges(drizzleDb);
 
   if (stats.files_failed > 0) {
     console.warn(`[indexer] ${stats.files_failed} file(s) failed to parse`);
