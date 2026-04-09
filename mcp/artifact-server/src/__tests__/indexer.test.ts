@@ -7,7 +7,7 @@ import path from "path";
 import { createHash } from "crypto";
 import { stringify } from "yaml";
 import { createSchema } from "../schema.js";
-import { rebuildIndex, detectCycles, indexFiles, removeFiles, deriveJournalEntryCycleEdges, MAX_DEPENDENCY_NODES, MAX_DEPENDENCY_EDGES } from "../indexer.js";
+import { rebuildIndex, detectCycles, indexFiles, removeFiles, deriveJournalEntryCycleEdges, deriveJournalEntryEdges, MAX_DEPENDENCY_NODES, MAX_DEPENDENCY_EDGES } from "../indexer.js";
 import { computeArtifactHash, upsertNode, upsertJournalEntry, upsertDocumentArtifact } from "../db-helpers.js";
 
 // ---------------------------------------------------------------------------
@@ -1412,5 +1412,105 @@ describe("deriveJournalEntryCycleEdges — stale edge removal (WI-726)", () => {
       `SELECT COUNT(*) as cnt FROM edges WHERE source_id = 'J-024-001' AND edge_type = 'belongs_to_cycle'`
     ).get() as { cnt: number }).cnt;
     expect(countAfterRemoval).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// indexFiles — derivation trigger tests (WI-727)
+// ---------------------------------------------------------------------------
+
+describe("indexFiles — derivation triggered by work_item change (WI-727)", () => {
+  it("derives relates_to edge when new work_item file is indexed via indexFiles", () => {
+    const db = freshDb();
+    const drizzleDb = drizzle(db);
+    const ideateDir = makeIdeateDir(tmpDir);
+
+    // Step 1: seed a journal entry referencing WI-500 directly in the DB (no edge created).
+    // Bypassing indexFiles/rebuildIndex ensures no edge exists yet.
+    upsertNode(drizzleDb, {
+      id: "J-001-001",
+      type: "journal_entry",
+      cycle_created: 1,
+      cycle_modified: null,
+      content_hash: "",
+      token_count: 0,
+      file_path: "",
+      status: "active",
+    });
+    upsertJournalEntry(drizzleDb, {
+      id: "J-001-001",
+      phase: null,
+      date: "2026-01-01",
+      title: "Journal entry J-001-001",
+      work_item: "WI-500",
+      content: "Some content",
+    });
+
+    // Step 2: verify 0 relates_to edges — WI-500 is not in the graph yet
+    const countBefore = (db.prepare(
+      `SELECT COUNT(*) as cnt FROM edges WHERE source_id = 'J-001-001' AND edge_type = 'relates_to'`
+    ).get() as { cnt: number }).cnt;
+    expect(countBefore).toBe(0);
+
+    // Step 3: write WI-500.yaml to disk and index it via indexFiles
+    const wiPath = writeYaml(
+      path.join(ideateDir, "work-items"),
+      "WI-500.yaml",
+      minimalWorkItem({ id: "WI-500", title: "New work item" })
+    );
+    indexFiles(db, drizzleDb, [wiPath]);
+
+    // Step 4: relates_to edge should now exist from J-001-001 to WI-500
+    const countAfter = (db.prepare(
+      `SELECT COUNT(*) as cnt FROM edges WHERE source_id = 'J-001-001' AND target_id = 'WI-500' AND edge_type = 'relates_to'`
+    ).get() as { cnt: number }).cnt;
+    expect(countAfter).toBe(1);
+  });
+});
+
+describe("indexFiles — derivation triggered by cycle_summary change (WI-727)", () => {
+  it("derives belongs_to_cycle edge when new cycle_summary file is indexed via indexFiles", () => {
+    const db = freshDb();
+    const drizzleDb = drizzle(db);
+    const ideateDir = makeIdeateDir(tmpDir);
+
+    // Step 1: seed a journal entry J-001-001 for cycle 1 directly in the DB (no edges).
+    upsertNode(drizzleDb, {
+      id: "J-001-001",
+      type: "journal_entry",
+      cycle_created: 1,
+      cycle_modified: null,
+      content_hash: "",
+      token_count: 0,
+      file_path: "",
+      status: "active",
+    });
+    upsertJournalEntry(drizzleDb, {
+      id: "J-001-001",
+      phase: null,
+      date: "2026-01-01",
+      title: "Journal entry J-001-001",
+      work_item: null,
+      content: "Some content",
+    });
+
+    // Step 2: verify 0 belongs_to_cycle edges — no cycle_summary exists yet
+    const countBefore = (db.prepare(
+      `SELECT COUNT(*) as cnt FROM edges WHERE source_id = 'J-001-001' AND edge_type = 'belongs_to_cycle'`
+    ).get() as { cnt: number }).cnt;
+    expect(countBefore).toBe(0);
+
+    // Step 3: write a cycle_summary YAML for cycle 1 into the cycles/001/ directory
+    // and index it via indexFiles.
+    const cycleDir = path.join(ideateDir, "cycles", "001");
+    fs.mkdirSync(cycleDir, { recursive: true });
+    const summaryPath = writeYaml(cycleDir, "summary-001.yaml", cycleSummaryYaml("summary-001", 1));
+    indexFiles(db, drizzleDb, [summaryPath]);
+
+    // Step 4: belongs_to_cycle edge should now exist from J-001-001 to summary-001
+    const countAfter = (db.prepare(
+      `SELECT COUNT(*) as cnt FROM edges WHERE source_id = 'J-001-001' AND target_id = 'summary-001' AND edge_type = 'belongs_to_cycle'`
+    ).get() as { cnt: number }).cnt;
+    expect(countAfter).toBe(1);
   });
 });
