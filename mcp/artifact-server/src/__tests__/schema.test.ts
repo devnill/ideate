@@ -799,6 +799,38 @@ describe("EDGE_TYPE_REGISTRY — belongs_to_phase entry", () => {
 });
 
 // ---------------------------------------------------------------------------
+// EDGE_TYPES — belongs_to_cycle
+// ---------------------------------------------------------------------------
+
+describe("EDGE_TYPES — belongs_to_cycle", () => {
+  it("EDGE_TYPES includes belongs_to_cycle", () => {
+    expect(EDGE_TYPES).toContain("belongs_to_cycle");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EDGE_TYPE_REGISTRY — belongs_to_cycle entry
+// ---------------------------------------------------------------------------
+
+describe("EDGE_TYPE_REGISTRY — belongs_to_cycle entry", () => {
+  it("belongs_to_cycle entry exists in EDGE_TYPE_REGISTRY", () => {
+    expect(EDGE_TYPE_REGISTRY).toHaveProperty("belongs_to_cycle");
+  });
+
+  it("belongs_to_cycle has correct source_types", () => {
+    expect(EDGE_TYPE_REGISTRY.belongs_to_cycle.source_types).toEqual(["journal_entry"]);
+  });
+
+  it("belongs_to_cycle has correct target_types", () => {
+    expect(EDGE_TYPE_REGISTRY.belongs_to_cycle.target_types).toEqual(["cycle_summary"]);
+  });
+
+  it("belongs_to_cycle has yaml_field null", () => {
+    expect(EDGE_TYPE_REGISTRY.belongs_to_cycle.yaml_field).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // document_artifacts.cycle populated by indexer for cycle_summary YAML
 // ---------------------------------------------------------------------------
 
