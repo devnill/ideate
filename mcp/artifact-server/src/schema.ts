@@ -28,6 +28,7 @@ export const EDGE_TYPES = [
   "informed_by",
   "belongs_to_project",
   "belongs_to_phase",
+  "belongs_to_cycle",
 ] as const;
 
 export type EdgeType = (typeof EDGE_TYPES)[number];
@@ -133,6 +134,12 @@ export const EDGE_TYPE_REGISTRY: Record<EdgeType, EdgeTypeSpec> = {
     source_types: ["work_item"],
     target_types: ["phase"],
     yaml_field: "phase",
+  },
+  belongs_to_cycle: {
+    description: "Journal entry belongs to a review cycle",
+    source_types: ["journal_entry"],
+    target_types: ["cycle_summary"],
+    yaml_field: null,
   },
 };
 

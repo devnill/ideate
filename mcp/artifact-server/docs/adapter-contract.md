@@ -627,7 +627,8 @@ type EdgeType =
   | "governed_by"
   | "informed_by"
   | "belongs_to_project"
-  | "belongs_to_phase";
+  | "belongs_to_phase"
+  | "belongs_to_cycle";
 ```
 
 ### Node
