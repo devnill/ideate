@@ -873,6 +873,20 @@ describe("handleGetDomainState", () => {
     const result = await handleGetDomainState(ctx, {});
     expect(result).toContain("No domain data found");
   });
+
+  it("excludes deprecated and superseded policies from output", async () => {
+    // Active policy — should appear
+    insertDomainPolicy("P-active-01", "workflow", "Active policy stays", "active");
+    // Deprecated policy — should be excluded
+    insertDomainPolicy("P-depr-01", "workflow", "Deprecated policy is hidden", "deprecated");
+    // Superseded policy — should be excluded
+    insertDomainPolicy("P-supr-01", "workflow", "Superseded policy is hidden", "superseded");
+
+    const result = await handleGetDomainState(ctx, {});
+    expect(result).toContain("P-active-01");
+    expect(result).not.toContain("P-depr-01");
+    expect(result).not.toContain("P-supr-01");
+  });
 });
 
 // ---------------------------------------------------------------------------
