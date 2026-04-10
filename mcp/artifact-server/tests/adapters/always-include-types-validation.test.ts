@@ -22,7 +22,7 @@ import type { StorageAdapter, NodeType } from "../../src/adapter.js";
 
 // Compile-time exhaustiveness: every NodeType must appear in ALL_NODE_TYPES.
 // If a new NodeType member is added without updating ALL_NODE_TYPES, this line
-// produces: "Type 'X' is not assignable to type 'never'"
+// produces: "Type 'true' is not assignable to type 'false'"
 type _ExhaustiveCheck = Exclude<NodeType, typeof ALL_NODE_TYPES[number]> extends never
   ? true
   : false;
