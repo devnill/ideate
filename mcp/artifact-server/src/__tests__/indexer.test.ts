@@ -7,6 +7,7 @@ import path from "path";
 import { createHash } from "crypto";
 import { stringify } from "yaml";
 import { createSchema } from "../schema.js";
+import * as dbSchema from "../db.js";
 import { rebuildIndex, detectCycles, indexFiles, removeFiles, deriveJournalEntryCycleEdges, deriveJournalEntryEdges, MAX_DEPENDENCY_NODES, MAX_DEPENDENCY_EDGES } from "../indexer.js";
 import { computeArtifactHash, upsertNode, upsertJournalEntry, upsertDocumentArtifact } from "../db-helpers.js";
 
@@ -126,7 +127,7 @@ describe("rebuildIndex — empty directory", () => {
   it("returns zero stats for empty .ideate/ dir", () => {
     const db = freshDb();
     const ideateDir = makeIdeateDir(tmpDir);
-    const stats = rebuildIndex(db, drizzle(db),ideateDir);
+    const stats = rebuildIndex(db, drizzle(db, { schema: dbSchema }),ideateDir);
     expect(stats.files_scanned).toBe(0);
     expect(stats.files_updated).toBe(0);
     expect(stats.files_deleted).toBe(0);
@@ -145,7 +146,7 @@ describe("rebuildIndex — work item YAML → table populated", () => {
       minimalWorkItem({ id: "WI-001", title: "Test work item" })
     );
 
-    rebuildIndex(db, drizzle(db),ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }),ideateDir);
 
     const row = db
       .prepare("SELECT * FROM work_items WHERE id = 'WI-001'")
@@ -168,7 +169,7 @@ describe("rebuildIndex — depends edge extracted", () => {
       minimalWorkItem({ id: "WI-002", title: "Second item", depends: ["WI-001"] })
     );
 
-    rebuildIndex(db, drizzle(db),ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }),ideateDir);
 
     const edge = db
       .prepare(
@@ -192,8 +193,8 @@ describe("rebuildIndex — incremental skip for unchanged file", () => {
       minimalWorkItem()
     );
 
-    rebuildIndex(db, drizzle(db),ideateDir);
-    const stats2 = rebuildIndex(db, drizzle(db),ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }),ideateDir);
+    const stats2 = rebuildIndex(db, drizzle(db, { schema: dbSchema }),ideateDir);
 
     expect(stats2.files_updated).toBe(0);
   });
@@ -209,12 +210,12 @@ describe("rebuildIndex — incremental update for changed file", () => {
       minimalWorkItem({ title: "Original title" })
     );
 
-    rebuildIndex(db, drizzle(db),ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }),ideateDir);
 
     // Overwrite with new content
     fs.writeFileSync(wiPath, minimalWorkItem({ title: "Updated title" }), "utf8");
 
-    const stats2 = rebuildIndex(db, drizzle(db),ideateDir);
+    const stats2 = rebuildIndex(db, drizzle(db, { schema: dbSchema }),ideateDir);
 
     expect(stats2.files_updated).toBe(1);
 
@@ -236,7 +237,7 @@ describe("rebuildIndex — stale row deletion", () => {
       minimalWorkItem()
     );
 
-    rebuildIndex(db, drizzle(db),ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }),ideateDir);
 
     // Confirm it was inserted
     const before = db
@@ -246,7 +247,7 @@ describe("rebuildIndex — stale row deletion", () => {
 
     // Delete the file and rebuild
     fs.unlinkSync(wiPath);
-    rebuildIndex(db, drizzle(db),ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }),ideateDir);
 
     const after = db
       .prepare("SELECT * FROM work_items WHERE id = 'WI-001'")
@@ -267,7 +268,7 @@ describe("rebuildIndex — node_file_refs from scope", () => {
       })
     );
 
-    rebuildIndex(db, drizzle(db),ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }),ideateDir);
 
     const ref = db
       .prepare(
@@ -301,7 +302,7 @@ describe("rebuildIndex — blocks edge extracted", () => {
       minimalWorkItem({ id: "WI-002", title: "Blocker item", blocks: ["WI-001"] })
     );
 
-    rebuildIndex(db, drizzle(db),ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }),ideateDir);
 
     const edge = db
       .prepare(
@@ -325,7 +326,7 @@ describe("rebuildIndex — belongs_to_module edge extracted", () => {
       minimalWorkItem({ id: "WI-001", module: "MOD-core" })
     );
 
-    rebuildIndex(db, drizzle(db),ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }),ideateDir);
 
     const edge = db
       .prepare(
@@ -349,7 +350,7 @@ describe("rebuildIndex — belongs_to_domain edge extracted", () => {
       minimalWorkItem({ id: "WI-001", domain: "workflow" })
     );
 
-    rebuildIndex(db, drizzle(db),ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }),ideateDir);
 
     const edge = db
       .prepare(
@@ -387,7 +388,7 @@ describe("rebuildIndex — derived_from edge extracted", () => {
 
     writeYaml(policiesDir, "DP-001.yaml", yaml);
 
-    rebuildIndex(db, drizzle(db),ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }),ideateDir);
 
     const edge = db
       .prepare(
@@ -422,7 +423,7 @@ describe("rebuildIndex — derived_from edge extracted", () => {
 
     writeYaml(policiesDir, "DP-002.yaml", yaml);
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     // Should create two separate edges, not one edge to the whole string
     const edge1 = db
@@ -473,7 +474,7 @@ describe("rebuildIndex — comma-split restricted to derived_from", () => {
 
     writeYaml(decisionsDir, "D-099.yaml", yaml);
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     // Should produce exactly one supersedes edge targeting the literal "D-001,D-002"
     const edges = db
@@ -510,7 +511,7 @@ describe("rebuildIndex — relates_to edge extracted", () => {
 
     writeYaml(archiveDir, "FIND-001.yaml", yaml);
 
-    rebuildIndex(db, drizzle(db),ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }),ideateDir);
 
     const edge = db
       .prepare(
@@ -546,7 +547,7 @@ describe("rebuildIndex — supersedes edge extracted", () => {
 
     writeYaml(decisionsDir, "DD-002.yaml", yaml);
 
-    rebuildIndex(db, drizzle(db),ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }),ideateDir);
 
     const edge = db
       .prepare(
@@ -584,7 +585,7 @@ describe("rebuildIndex — addressed_by edge extracted", () => {
 
     writeYaml(archiveDir, "FIND-002.yaml", yaml);
 
-    rebuildIndex(db, drizzle(db),ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }),ideateDir);
 
     const edge = db
       .prepare(
@@ -620,7 +621,7 @@ describe("rebuildIndex — addressed_by edge extracted", () => {
 
     writeYaml(archiveDir, "FIND-010.yaml", yaml);
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     const edge = db
       .prepare(
@@ -656,7 +657,7 @@ describe("rebuildIndex — addressed_by edge extracted", () => {
 
     writeYaml(archiveDir, "FIND-011.yaml", yaml);
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     const edge = db
       .prepare(
@@ -691,7 +692,7 @@ describe("rebuildIndex — addressed_by edge extracted", () => {
 
     writeYaml(archiveDir, "FIND-012.yaml", yaml);
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     const edge = db
       .prepare(
@@ -726,7 +727,7 @@ describe("rebuildIndex — addressed_by edge extracted", () => {
 
     writeYaml(archiveDir, "FIND-013.yaml", yaml);
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     const edge = db
       .prepare(
@@ -763,7 +764,7 @@ describe("rebuildIndex — addressed_by edge extracted", () => {
 
     writeYaml(archiveDir, "FIND-014.yaml", yaml);
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     const edges = db
       .prepare(
@@ -799,7 +800,7 @@ describe("rebuildIndex — amended_by edge extracted", () => {
 
     writeYaml(policiesDir, "DP-001.yaml", yaml);
 
-    rebuildIndex(db, drizzle(db),ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }),ideateDir);
 
     const edge = db
       .prepare(
@@ -849,7 +850,7 @@ describe("rebuildIndex — interview entries create interview_question nodes", (
 
     writeYaml(interviewsDir, "INT-022.yaml", yaml);
 
-    const stats = rebuildIndex(db, drizzle(db), ideateDir);
+    const stats = rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     // Parent interview node should be indexed
     const interviewNode = db
@@ -911,7 +912,7 @@ describe("rebuildIndex — interview entries create interview_question nodes", (
 
     writeYaml(interviewsDir, "INT-001.yaml", yaml);
 
-    const stats = rebuildIndex(db, drizzle(db), ideateDir);
+    const stats = rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     const interviewNode = db
       .prepare(`SELECT * FROM nodes WHERE id = 'INT-001'`)
@@ -961,7 +962,7 @@ describe("rebuildIndex — interview entries create interview_question nodes", (
 
     writeYaml(interviewsDir, "INT-030.yaml", yaml);
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     // IQ-030-001 with domain=workflow should have a belongs_to_domain edge
     const domainEdge = db
@@ -1009,7 +1010,7 @@ describe("rebuildIndex — triggered_by object-array items produce edges", () =>
 
     writeYaml(proxyDir, "PHD-005-001.yaml", yaml);
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     const edge = db
       .prepare(
@@ -1053,7 +1054,7 @@ describe("rebuildIndex — triggered_by object-array items produce edges", () =>
     writeYaml(wiDir, "WI-200.yaml", yaml);
     writeYaml(wiDir, "WI-201.yaml", yaml2);
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     const edge = db
       .prepare(
@@ -1071,7 +1072,7 @@ describe("rebuildIndex — malformed YAML file", () => {
     const ideateDir = makeIdeateDir(tmpDir);
     writeYaml(ideateDir, "bad.yaml", "{ invalid yaml: [unclosed");
 
-    const stats = rebuildIndex(db, drizzle(db),ideateDir);
+    const stats = rebuildIndex(db, drizzle(db, { schema: dbSchema }),ideateDir);
 
     expect(stats.files_failed).toBeGreaterThanOrEqual(1);
     expect(stats.parse_errors.length).toBeGreaterThanOrEqual(1);
@@ -1085,7 +1086,7 @@ describe("rebuildIndex — malformed YAML file", () => {
 describe("detectCycles — no cycles", () => {
   it("returns [] on empty DB", () => {
     const db = freshDb();
-    expect(detectCycles(drizzle(db))).toEqual([]);
+    expect(detectCycles(drizzle(db, { schema: dbSchema }))).toEqual([]);
   });
 
   it("returns [] for a simple A→B→C DAG", () => {
@@ -1098,7 +1099,7 @@ describe("detectCycles — no cycles", () => {
     insert.run("A", "B");
     insert.run("B", "C");
     db.pragma("foreign_keys = ON");
-    expect(detectCycles(drizzle(db))).toEqual([]);
+    expect(detectCycles(drizzle(db, { schema: dbSchema }))).toEqual([]);
   });
 });
 
@@ -1114,7 +1115,7 @@ describe("detectCycles — simple 2-node cycle", () => {
     insert.run("B", "A");
     db.pragma("foreign_keys = ON");
 
-    const cycles = detectCycles(drizzle(db));
+    const cycles = detectCycles(drizzle(db, { schema: dbSchema }));
     expect(cycles.length).toBeGreaterThan(0);
 
     const allNodes = cycles.flat();
@@ -1136,7 +1137,7 @@ describe("detectCycles — 3-node cycle", () => {
     insert.run("C", "A");
     db.pragma("foreign_keys = ON");
 
-    const cycles = detectCycles(drizzle(db));
+    const cycles = detectCycles(drizzle(db, { schema: dbSchema }));
     expect(cycles.length).toBeGreaterThan(0);
 
     const allNodes = cycles.flat();
@@ -1185,7 +1186,7 @@ describe("rebuildIndex — document artifact types map to document_artifacts tab
 
       writeYaml(ideateDir, `${docType}.yaml`, yaml);
 
-      const stats = rebuildIndex(db, drizzle(db), ideateDir);
+      const stats = rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
       expect(stats.parse_errors.filter((e) => e.includes(`unknown type '${docType}'`))).toHaveLength(0);
 
@@ -1210,7 +1211,7 @@ describe("detectCycles — traversal limits", () => {
       insert.run(`A${i}`, `B${i}`);
     }
     db.pragma("foreign_keys = ON");
-    expect(() => detectCycles(drizzle(db))).toThrow(/edge count .* exceeds limit/);
+    expect(() => detectCycles(drizzle(db, { schema: dbSchema }))).toThrow(/edge count .* exceeds limit/);
   });
 
   it("throws when node count exceeds MAX_DEPENDENCY_NODES", () => {
@@ -1226,7 +1227,7 @@ describe("detectCycles — traversal limits", () => {
       insert.run(`SRC${i}`, `TGT${i}`);
     }
     db.pragma("foreign_keys = ON");
-    expect(() => detectCycles(drizzle(db))).toThrow(/node count .* exceeds limit/);
+    expect(() => detectCycles(drizzle(db, { schema: dbSchema }))).toThrow(/node count .* exceeds limit/);
   });
 });
 
@@ -1244,7 +1245,7 @@ describe("indexFiles — single file add", () => {
       minimalWorkItem({ id: "WI-100", title: "Indexed via indexFiles" })
     );
 
-    const result = indexFiles(db, drizzle(db), [filePath]);
+    const result = indexFiles(db, drizzle(db, { schema: dbSchema }), [filePath]);
 
     expect(result.updated).toBe(1);
     expect(result.failed).toBe(0);
@@ -1275,11 +1276,11 @@ describe("indexFiles — unchanged file skipped", () => {
     );
 
     // First index
-    const first = indexFiles(db, drizzle(db), [filePath]);
+    const first = indexFiles(db, drizzle(db, { schema: dbSchema }), [filePath]);
     expect(first.updated).toBe(1);
 
     // Second index with same content
-    const second = indexFiles(db, drizzle(db), [filePath]);
+    const second = indexFiles(db, drizzle(db, { schema: dbSchema }), [filePath]);
     expect(second.updated).toBe(0);
     expect(second.failed).toBe(0);
     expect(second.errors).toHaveLength(0);
@@ -1296,7 +1297,7 @@ describe("indexFiles — parse error", () => {
       "{ invalid yaml: [unclosed"
     );
 
-    const result = indexFiles(db, drizzle(db), [filePath]);
+    const result = indexFiles(db, drizzle(db, { schema: dbSchema }), [filePath]);
 
     expect(result.updated).toBe(0);
     expect(result.failed).toBe(1);
@@ -1312,7 +1313,7 @@ describe("indexFiles — non-YAML file path", () => {
     // indexSingleFile catches the read error and returns a silent no-op.
     const fakePath = path.join(tmpDir, ".ideate", "config.json");
 
-    const result = indexFiles(db, drizzle(db), [fakePath]);
+    const result = indexFiles(db, drizzle(db, { schema: dbSchema }), [fakePath]);
 
     expect(result.updated).toBe(0);
     expect(result.failed).toBe(0);
@@ -1335,7 +1336,7 @@ describe("removeFiles — cascade removal", () => {
     );
 
     // Index the file first
-    const indexResult = indexFiles(db, drizzle(db), [filePath]);
+    const indexResult = indexFiles(db, drizzle(db, { schema: dbSchema }), [filePath]);
     expect(indexResult.updated).toBe(1);
 
     // Confirm both node and extension row exist
@@ -1350,7 +1351,7 @@ describe("removeFiles — cascade removal", () => {
     expect(extBefore).toBeDefined();
 
     // Remove via removeFiles
-    const removeResult = removeFiles(db, drizzle(db), [filePath]);
+    const removeResult = removeFiles(db, drizzle(db, { schema: dbSchema }), [filePath]);
     expect(removeResult.removed).toBe(1);
 
     // Verify the node is gone
@@ -1403,7 +1404,7 @@ describe("rebuildIndex — project YAML creates node and extension row", () => {
 
     writeYaml(path.join(ideateDir, "projects"), "PROJ-001.yaml", yaml);
 
-    const stats = rebuildIndex(db, drizzle(db), ideateDir);
+    const stats = rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     expect(stats.parse_errors.filter((e) => e.includes("PROJ-001"))).toHaveLength(0);
 
@@ -1448,7 +1449,7 @@ describe("rebuildIndex — phase YAML creates node and extension row", () => {
 
     writeYaml(path.join(ideateDir, "phases"), "PHASE-001.yaml", yaml);
 
-    const stats = rebuildIndex(db, drizzle(db), ideateDir);
+    const stats = rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     expect(stats.parse_errors.filter((e) => e.includes("PHASE-001"))).toHaveLength(0);
 
@@ -1491,7 +1492,7 @@ describe("rebuildIndex — phase with project field creates belongs_to_project e
 
     writeYaml(path.join(ideateDir, "phases"), "PHASE-002.yaml", yaml);
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     const edge = db
       .prepare(
@@ -1514,7 +1515,7 @@ describe("rebuildIndex — work item with phase field creates belongs_to_phase e
       minimalWorkItem({ id: "WI-003", title: "Phase-scoped work item", phase: "PHASE-001" })
     );
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     const edge = db
       .prepare(
@@ -1547,7 +1548,7 @@ describe("rebuildIndex — work item with phase field creates belongs_to_phase e
 
     writeYaml(path.join(ideateDir, "cycles"), "JE-001.yaml", yaml);
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     const edge = db
       .prepare(
@@ -1618,7 +1619,7 @@ describe("rebuildIndex — content_hash excludes metadata fields", () => {
       yamlLines.join("\n") + "\n"
     );
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     // The stored content_hash must match the hash computed from content fields only
     const node = db
@@ -1640,7 +1641,7 @@ describe("rebuildIndex — content_hash excludes metadata fields", () => {
     );
 
     // First index
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     const nodeAfterFirst = db
       .prepare("SELECT content_hash FROM nodes WHERE id = 'WI-998'")
@@ -1649,7 +1650,7 @@ describe("rebuildIndex — content_hash excludes metadata fields", () => {
     const hashAfterFirst = nodeAfterFirst!.content_hash;
 
     // Second rebuild with same file on disk — hash must not change
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     const nodeAfterSecond = db
       .prepare("SELECT content_hash FROM nodes WHERE id = 'WI-998'")
@@ -1710,7 +1711,7 @@ describe("rebuildIndex — journal entry relates_to edges from title (WI-719)", 
     writeYaml(wiDir, "WI-117.yaml", minimalWorkItem({ id: "WI-117", title: "Some work item" }));
     writeYaml(cyclesDir, "J-001.yaml", journalEntryYaml("J-001", "Work item 117: Implement feature"));
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     const edge = db
       .prepare(
@@ -1730,7 +1731,7 @@ describe("rebuildIndex — journal entry relates_to edges from title (WI-719)", 
     writeYaml(wiDir, "WI-683.yaml", minimalWorkItem({ id: "WI-683", title: "Another work item" }));
     writeYaml(cyclesDir, "J-002.yaml", journalEntryYaml("J-002", "WI-683: Fix the bug"));
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     const edge = db
       .prepare(
@@ -1749,7 +1750,7 @@ describe("rebuildIndex — journal entry relates_to edges from title (WI-719)", 
     // No WI-999 in the index
     writeYaml(cyclesDir, "J-003.yaml", journalEntryYaml("J-003", "Work item 999: Non-existent WI"));
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     const edge = db
       .prepare(
@@ -1769,7 +1770,7 @@ describe("rebuildIndex — journal entry relates_to edges from title (WI-719)", 
     writeYaml(wiDir, "WI-020.yaml", minimalWorkItem({ id: "WI-020", title: "Second WI" }));
     writeYaml(cyclesDir, "J-004.yaml", journalEntryYaml("J-004", "Work item 10 and WI-020 both updated"));
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     const edges = db
       .prepare(
@@ -1789,7 +1790,7 @@ describe("rebuildIndex — journal entry relates_to edges from title (WI-719)", 
     writeYaml(wiDir, "WI-005.yaml", minimalWorkItem({ id: "WI-005", title: "Padded WI" }));
     writeYaml(cyclesDir, "J-005.yaml", journalEntryYaml("J-005", "Work item 5: Short number"));
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     const edge = db
       .prepare(
@@ -1810,7 +1811,7 @@ describe("rebuildIndex — journal entry relates_to edges from title (WI-719)", 
     // Journal entry with work_item set but title has no WI pattern
     writeYaml(cyclesDir, "J-006.yaml", journalEntryYaml("J-006", "Daily standup notes", "WI-200"));
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     const edge = db
       .prepare(
@@ -1830,7 +1831,7 @@ describe("rebuildIndex — journal entry relates_to edges from title (WI-719)", 
     writeYaml(wiDir, "WI-300.yaml", minimalWorkItem({ id: "WI-300", title: "A work item" }));
     writeYaml(cyclesDir, "J-007.yaml", journalEntryYaml("J-007", "WI-300: Implemented feature", "WI-300"));
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     const edges = db
       .prepare(
@@ -1865,7 +1866,7 @@ function cycleSummaryYaml(id: string, cycle: number): string {
 describe("deriveJournalEntryCycleEdges — idempotency (WI-726)", () => {
   it("calling deriveJournalEntryCycleEdges directly twice does not duplicate belongs_to_cycle edges", () => {
     const db = freshDb();
-    const drizzleDb = drizzle(db);
+    const drizzleDb = drizzle(db, { schema: dbSchema });
 
     // Directly seed a journal_entry node (J-024-001 → cycle 24) without rebuildIndex.
     // rebuildIndex's Phase 1 wipes all edges via deleteEdgesBySourceId before Phase 3 runs,
@@ -1931,7 +1932,7 @@ describe("deriveJournalEntryCycleEdges — idempotency (WI-726)", () => {
 describe("deriveJournalEntryCycleEdges — stale edge removal (WI-726)", () => {
   it("removes the edge to the old cycle_summary when it is no longer indexed", () => {
     const db = freshDb();
-    const drizzleDb = drizzle(db);
+    const drizzleDb = drizzle(db, { schema: dbSchema });
     const ideateDir = makeIdeateDir(tmpDir);
     const cycleDir = path.join(ideateDir, "cycles");
 
@@ -1971,7 +1972,7 @@ describe("deriveJournalEntryCycleEdges — stale edge removal (WI-726)", () => {
 describe("indexFiles — derivation triggered by work_item change (WI-727)", () => {
   it("derives relates_to edge when new work_item file is indexed via indexFiles", () => {
     const db = freshDb();
-    const drizzleDb = drizzle(db);
+    const drizzleDb = drizzle(db, { schema: dbSchema });
     const ideateDir = makeIdeateDir(tmpDir);
 
     // Step 1: seed a journal entry referencing WI-500 directly in the DB (no edge created).
@@ -2020,7 +2021,7 @@ describe("indexFiles — derivation triggered by work_item change (WI-727)", () 
 describe("indexFiles — derivation triggered by cycle_summary change (WI-727)", () => {
   it("derives belongs_to_cycle edge when new cycle_summary file is indexed via indexFiles", () => {
     const db = freshDb();
-    const drizzleDb = drizzle(db);
+    const drizzleDb = drizzle(db, { schema: dbSchema });
     const ideateDir = makeIdeateDir(tmpDir);
 
     // Step 1: seed a journal entry J-001-001 for cycle 1 directly in the DB (no edges).
@@ -2073,7 +2074,7 @@ describe("rebuildIndex — journal entry belongs_to_cycle edges (WI-720)", () =>
     writeYaml(cyclesDir, "CS-019.yaml", cycleSummaryYaml("CS-019", 19));
     writeYaml(cyclesDir, "J-019-001.yaml", journalEntryYaml("J-019-001", "Some entry"));
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     const edge = db
       .prepare(
@@ -2091,7 +2092,7 @@ describe("rebuildIndex — journal entry belongs_to_cycle edges (WI-720)", () =>
 
     writeYaml(cyclesDir, "J-042-001.yaml", journalEntryYaml("J-042-001", "Orphan entry"));
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     const edge = db
       .prepare(`SELECT * FROM edges WHERE source_id = 'J-042-001' AND edge_type = 'belongs_to_cycle'`)
@@ -2108,7 +2109,7 @@ describe("rebuildIndex — journal entry belongs_to_cycle edges (WI-720)", () =>
     writeYaml(cyclesDir, "CQ-005a.yaml", cycleSummaryYaml("CQ-005", 5));
     writeYaml(cyclesDir, "J-005-001.yaml", journalEntryYaml("J-005-001", "Cycle 5 entry"));
 
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     const edges = db
       .prepare(
@@ -2127,7 +2128,7 @@ describe("rebuildIndex — stats.edges_created accuracy (Q-138, WI-731)", () => 
     // inflating stats.edges_created to 2x the actual derived edge count.
     // Post-fix: each function runs exactly once via the transactional wrappers only.
     const db = freshDb();
-    const drizzleDb = drizzle(db);
+    const drizzleDb = drizzle(db, { schema: dbSchema });
     const ideateDir = makeIdeateDir(tmpDir);
     const cyclesDir = path.join(ideateDir, "cycles");
 
@@ -2164,7 +2165,7 @@ describe("indexFiles — journal entry belongs_to_cycle derivation (WI-720 incre
 
     // Seed: index the cycle_summary first via rebuildIndex
     writeYaml(cyclesDir, "CS-007.yaml", cycleSummaryYaml("CS-007", 7));
-    rebuildIndex(db, drizzle(db), ideateDir);
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
 
     // Now add a journal entry incrementally using the canonical path structure
     // (cycles/{NNN}/journal/) so the hasJournalUpdate condition fires in indexFiles
@@ -2172,7 +2173,7 @@ describe("indexFiles — journal entry belongs_to_cycle derivation (WI-720 incre
     fs.mkdirSync(journalDir, { recursive: true });
     const journalPath = path.join(journalDir, "J-007-001.yaml");
     fs.writeFileSync(journalPath, journalEntryYaml("J-007-001", "Incremental entry"), "utf8");
-    indexFiles(db, drizzle(db), [journalPath]);
+    indexFiles(db, drizzle(db, { schema: dbSchema }), [journalPath]);
 
     const edge = db
       .prepare(
