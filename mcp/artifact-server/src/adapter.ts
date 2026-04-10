@@ -41,7 +41,7 @@ export type NodeType =
   | "domain_index";
 
 /** All valid NodeType values for runtime validation. */
-export const ALL_NODE_TYPES: readonly NodeType[] = [
+export const ALL_NODE_TYPES = [
   "work_item",
   "finding",
   "domain_policy",
@@ -93,10 +93,10 @@ export interface Node extends NodeMeta {
 
 // EdgeType and EDGE_TYPES are canonically defined in schema.ts.
 // Re-exported here for backwards compatibility with existing callers.
+import type { EdgeType } from "./schema.js"; // Local import for use below; re-exported for callers below
+import { EDGE_TYPES } from "./schema.js";
 export type { EdgeType } from "./schema.js";
 export { EDGE_TYPES } from "./schema.js";
-import { EDGE_TYPES } from "./schema.js";
-import type { EdgeType } from "./schema.js"; // Local import for use below; line 96 is the re-export for callers
 
 /** All valid EdgeType values for runtime validation. Canonical source: EDGE_TYPES in schema.ts. */
 export const ALL_EDGE_TYPES = EDGE_TYPES;
