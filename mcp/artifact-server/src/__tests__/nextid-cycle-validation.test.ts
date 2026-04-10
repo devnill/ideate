@@ -5,6 +5,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { LocalAdapter } from "../../src/adapters/local/index.js";
+import { LocalWriterAdapter } from "../../src/adapters/local/writer.js";
 import { ValidationError } from "../../src/adapter.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -300,6 +301,35 @@ describe("WI-645: nextId cycle parameter validation", () => {
     it("validates cycle for proxy_human_decision", async () => {
       await expect(adapter.nextId("proxy_human_decision", -1)).rejects.toThrow(ValidationError);
       await expect(adapter.nextId("proxy_human_decision", 1.5)).rejects.toThrow(ValidationError);
+    });
+  });
+
+  describe("INVALID_NODE_TYPE: unsupported types in LocalWriterAdapter.nextId", () => {
+    // LocalWriterAdapter.nextId only handles journal_entry, work_item, and finding.
+    // Any other type throws ValidationError with code INVALID_NODE_TYPE.
+    // (LocalAdapter routes other types to the reader; this tests the writer directly.)
+    let writer: LocalWriterAdapter;
+
+    beforeAll(() => {
+      writer = new LocalWriterAdapter({
+        db,
+        drizzleDb: drizzle(db, { schema }),
+        ideateDir: path.join(testDir, ".ideate"),
+      });
+    });
+
+    it("throws INVALID_NODE_TYPE for unsupported node type", async () => {
+      await expect(
+        writer.nextId("domain_policy" as import("../../src/adapter.js").NodeType)
+      ).rejects.toMatchObject({
+        code: "INVALID_NODE_TYPE",
+      });
+    });
+
+    it("INVALID_NODE_TYPE error is a ValidationError", async () => {
+      await expect(
+        writer.nextId("guiding_principle" as import("../../src/adapter.js").NodeType)
+      ).rejects.toBeInstanceOf(ValidationError);
     });
   });
 });
