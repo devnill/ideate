@@ -41,7 +41,7 @@ export type NodeType =
   | "domain_index";
 
 /** All valid NodeType values for runtime validation. */
-export const ALL_NODE_TYPES: readonly NodeType[] = [
+export const ALL_NODE_TYPES = [
   "work_item",
   "finding",
   "domain_policy",
@@ -71,6 +71,18 @@ export const ALL_NODE_TYPES: readonly NodeType[] = [
   "domain_index",
 ] as const;
 
+// Compile-time exhaustiveness: every NodeType must appear in ALL_NODE_TYPES.
+// If a new NodeType member is added without updating ALL_NODE_TYPES, tsc emits:
+// "Type 'true' is not assignable to type 'false'"
+type _ExhaustiveNodeTypeCheck = Exclude<
+  NodeType,
+  typeof ALL_NODE_TYPES[number]
+> extends never
+  ? true
+  : false;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _nodeTypesExhaustive: _ExhaustiveNodeTypeCheck = true;
+
 /** Metadata common to every node. */
 export interface NodeMeta {
   id: string;
@@ -93,10 +105,10 @@ export interface Node extends NodeMeta {
 
 // EdgeType and EDGE_TYPES are canonically defined in schema.ts.
 // Re-exported here for backwards compatibility with existing callers.
+import type { EdgeType } from "./schema.js"; // Local import for use below; re-exported for callers below
+import { EDGE_TYPES } from "./schema.js";
 export type { EdgeType } from "./schema.js";
 export { EDGE_TYPES } from "./schema.js";
-import { EDGE_TYPES } from "./schema.js";
-import type { EdgeType } from "./schema.js"; // Local import for use below; line 96 is the re-export for callers
 
 /** All valid EdgeType values for runtime validation. Canonical source: EDGE_TYPES in schema.ts. */
 export const ALL_EDGE_TYPES = EDGE_TYPES;
