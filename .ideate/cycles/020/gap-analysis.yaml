@@ -1,9 +1,10 @@
 id: gap-analysis
 type: cycle_summary
-cycle: 20
 reviewer: gap-analyst
+scope: full-audit
+date: "20260409"
 content: |-
-  ## Gap Analysis — Cycle 20
+  ## Gap Analysis — Full Audit
 
   **Verdict**: Fail
 
@@ -12,32 +13,30 @@ content: |-
 
   ### Significant Findings
 
-  **SF1: Dead code in `rebuildIndex` causes double-call of both derivation functions and inflated `edges_created` stat**
-  - File: `src/indexer.ts:1011–1015`
-  - Merge artifact from WI-727 rework. Bare calls at lines 1013–1015 precede transactional Phase 3/4 blocks at lines 1024–1036. Every `rebuildIndex` runs both derivation functions twice. DB correctness preserved by P-67; `stats.edges_created` over-reports (counts derived edges twice). Comment label 'Phase 3' appears on both line 1011 and 1021.
-  - Fix: Remove lines 1011–1015 bare calls. Retain and correctly label transactional blocks.
+  **SF1: No test verifying ALL_NODE_TYPES exhaustively covers the NodeType union (P-59)**
+  - P-59 requires a CI check or unit test. No test for `ALL_NODE_TYPES` exists in `src/__tests__/`. `NodeType` is a 27-member union; `ALL_NODE_TYPES` is a manually maintained parallel array. TypeScript does not enforce exhaustiveness of `readonly` arrays against union types at compile time. A missed type in `ALL_NODE_TYPES` causes silent `INVALID_NODE_TYPE` failures for valid types.
+  - **Recommendation**: Add test: verify `ALL_NODE_TYPES` length matches expected count and contains all known `NodeType` values.
 
-  **SF2: `indexFiles` `hasJournalUpdate` guard not removed — WI-727 spec said replace, implementation added alongside**
-  - File: `src/indexer.ts:798–803`
-  - Journal file changes trigger four derivation calls (two functions × two guards). Work item resolution note confirms intent was replacement. Double work on incremental journal updates.
-  - Fix: Remove lines 798–803. `hasDerivedEdgeUpdate` already covers journal files.
+  **SF2: getDomainState deprecated/superseded filter tested only at tool level, not adapter-contract level**
+  - WI-734 verified the filter via `tools.test.ts` (`handleGetDomainState`). No test in `adapter-contract.test.ts` verifies `StorageAdapter.getDomainState` directly excludes deprecated/superseded policies. If the SQL filter is removed from the adapter, the tool-level test still passes. This is a contract gap — RemoteAdapter is not covered.
+  - **Recommendation**: Add test to `adapter-contract.test.ts`: insert active, deprecated, and superseded policies; call `adapter.getDomainState()`; assert deprecated and superseded are absent.
+
+  **SF3: `pretest.js` calls `process.exit(1)` blocking `npm test` in fresh checkouts**
+  - `scripts/pretest.js` calls `process.exit(1)` when `migrate-to-v3.js` is absent or stale. In a fresh checkout without the pre-built migration JS, `npm test` exits with code 1 and zero tests run. Comment says "advisory-only" but code contradicts this. No tracked work item.
+  - **Recommendation**: Replace `process.exit(1)` with `process.stderr.write(...)` only, consistent with stated intent.
 
   ### Minor Findings
 
-  **MF1: No test verifies `stats.edges_created` is accurate when derived edges are present**
-  - File: `src/__tests__/indexer.test.ts`
-  - The double-counting in SF1 went undetected because no test asserts a specific `edges_created` value in a scenario with journal entries + cycle summaries. Add one test asserting exact `edges_created` count after rebuildIndex with a known fixture.
-
-  **MF2: No P-49 backfill assessment documented for WI-725**
-  - `belongs_to_cycle` edges are runtime-derived and no YAML backfill is needed (correct behavior). But WI-725 notes contain no P-49 statement, leaving the reasoning implicit. A future reviewer cannot confirm P-49 was considered.
-  - Recommendation: Add to WI-725 resolution: 'No on-disk backfill needed — belongs_to_cycle edges are runtime-derived and regenerated on every rebuildIndex.'
+  **MF1**: Equivalence test files listed in `adapter-contract.md:671-675` do not exist (`tests/adapters/` directory is absent).
+  **MF2**: ValidationError constructor change (WI-733) has no dedicated regression test; existing tests verify code/message but not constructor signature.
+  **MF3**: Q-125 ("skills directories contain only .gitkeep") is stale — `skills/` now has SKILL.md files for 10 skills.
+  **MF4**: Watcher→indexer integration test (`watcher.test.ts:200`) does not exercise derivation phase — P-24 gap (low severity; derivation has unit coverage).
+  **MF5**: No architecture document for artifact server's own component structure; `docs/` contains only `adapter-contract.md` and two supporting docs.
 
   ### Suggestions
 
-  **S1: Q-117 and Q-118 unaffected by cycle 20 changes.**
-  SF2's double-trigger slightly worsens Q-117 concern (more work per journal file change) but the fundamental debounce question is unchanged.
-
-  **S2: Pre-existing test coverage gap — `review_output` and `domain_index` types absent from document-type coverage test loop (indexer.test.ts:1154).**
-  Not introduced by cycle 20. Pre-existing gap.
-content_hash: fa2d0c8656c029a6a5363518c6bb13e994e2794642e6400795228283feecc696
-token_count: 624
+  **S1**: `ALLOWLISTED_COMMANDS` in `hooks.ts` includes `cat` and `ls` — consider whether these expand the command surface unnecessarily.
+  **S2**: `adapter-contract.test.ts` getDomainState test verifies an active policy appears but does not assert `decisions` and `questions` arrays are also present.
+cycle: 20
+content_hash: 1ff02771a71da04e30e5b5919a60c14087591ba11e045d433736fed48cd313ba
+token_count: 756

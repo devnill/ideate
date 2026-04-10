@@ -1,13 +1,13 @@
 id: architecture
 type: architecture
 title: Architecture — Ideate v2
-content: |
+content: |-
   # Architecture — Ideate v2
-  
+
   ## 1. Component Map
-  
+
   ### Skills (User-Invocable Workflows)
-  
+
   | Skill | Purpose | Invokes Agents | Key Artifacts |
   |-------|---------|---------------|---------------|
   | `/ideate:init` | Initialize .ideate/ for an existing codebase — scaffold, survey, interview, bootstrap domains, plan | architect, domain-curator | .ideate/config.json, .ideate/principles/*, .ideate/constraints/*, domains/* |
@@ -15,9 +15,9 @@ content: |
   | `/ideate:review` | Comprehensive multi-perspective evaluation | code-reviewer, spec-reviewer, gap-analyst, journal-keeper, domain-curator | archive/cycles/{NNN}/*, domains/* |
   | `/ideate:refine` | Plan changes to existing codebase | researcher, architect, decomposer | Updated steering/*, new plan/work-items/* |
   | `/ideate:autopilot` | Autonomous SDLC loop until convergence (zero findings + zero violations) | spec-reviewer, code-reviewer, gap-analyst, journal-keeper, domain-curator, proxy-human | autopilot-state.md, proxy-human-log.md, journal.md, domains/* |
-  
+
   ### Agents (Delegated Workers)
-  
+
   | Agent | Model | Background | Tools | Spawned By |
   |-------|-------|-----------|-------|------------|
   | researcher | sonnet | yes | Read, Grep, Glob, WebSearch, WebFetch | init, refine |
@@ -29,21 +29,21 @@ content: |
   | journal-keeper | sonnet | no | Read, Grep, Glob | review |
   | domain-curator | opus | no | Read, Write, Glob | review, autopilot |
   | proxy-human | sonnet | no | Read, Grep, Glob, Bash | autopilot |
-  
+
   ### MCP Artifact Server (`mcp/artifact-server/`)
-  
+
   Built-in TypeScript MCP server providing structured data access to the `.ideate/` artifact directory. Uses SQLite as a runtime index over YAML source files. See Section 5 for details.
-  
+
   ### External Tooling
-  
+
   Session orchestration and remote work dispatch are handled by external MCP servers configured in .mcp.json.
-  
+
   ---
-  
+
   ## 2. Data Flow
-  
+
   ### Phase Sequence and Artifact Flow
-  
+
   ```
   USER IDEA
       │
@@ -91,13 +91,13 @@ content: |
       │
       ▼ (back to execute)
   ```
-  
+
   ### Coordination Protocol
-  
+
   All inter-phase communication is file-based. Each skill invocation starts with no in-memory state and reads everything it needs from the artifact directory. The artifact directory IS the coordination protocol.
-  
+
   Read/write permissions per phase:
-  
+
   | Artifact | init | execute | review | refine |
   |----------|------|---------|--------|--------|
   | steering/interview.md | write | read | read | append |
@@ -112,9 +112,9 @@ content: |
   | archive/incremental/*.md | — | write | read | read |
   | archive/cycles/{NNN}/*.md | — | — | write | read |
   | journal.md | init | append | append | append |
-  
+
   ---
-  
+
   ## 3. Skill Definitions
 
   ### `/ideate:init`
@@ -143,11 +143,11 @@ content: |
   **Decision points**: User input during interview phase. Planning proceeds without user input unless contradictions are found.
 
   ### `/ideate:execute`
-  
+
   **Trigger**: User runs `/ideate:execute` with optional artifact directory path.
-  
+
   **Input**: Reads plan/*, steering/*.
-  
+
   **Process**:
   1. Locate and read all plan artifacts
   2. Validate DAG, present execution plan, get confirmation
@@ -158,17 +158,17 @@ content: |
   7. Collect unresolvable gaps, present in batches
   8. Report status at milestones
   9. Final summary
-  
+
   **Output artifacts**: Project source code, archive/incremental/*.md, journal.md entries.
-  
+
   **Decision points**: Confirmation before starting. Andon cord for unresolvable issues.
-  
+
   ### `/ideate:review`
-  
+
   **Trigger**: User runs `/ideate:review` with optional artifact directory path.
-  
+
   **Input**: Reads everything — steering/*, plan/*, archive/incremental/*, journal.md, project source code.
-  
+
   **Process**:
   1. Locate artifacts, read all context
   2. Survey project source code
@@ -179,17 +179,17 @@ content: |
   7. Present findings, ask user about items requiring decisions
   8. Record answers in journal
   9. Suggest refine if warranted
-  
+
   **Output artifacts**: archive/cycles/{NNN}/*.md, domains/*, journal.md entry.
-  
+
   **Decision points**: Findings requiring user input (not covered by steering docs).
-  
+
   ### `/ideate:refine`
-  
+
   **Trigger**: User runs `/ideate:refine` with optional change description.
-  
+
   **Input**: All existing artifacts + project source code.
-  
+
   **Process**:
   1. Locate artifact directory
   2. Spawn `architect` to survey existing codebase
@@ -201,17 +201,17 @@ content: |
   8. Write change plan to overview.md
   9. Update architecture if needed
   10. Present refinement summary
-  
+
   **Output artifacts**: Updated steering/*, new plan/work-items/*, journal.md entry.
-  
+
   **Decision points**: User input on what to change, which review findings to address vs defer.
-  
+
   ---
-  
+
   ## 4. Agent Definitions
-  
+
   ### researcher
-  
+
   - **Purpose**: Investigate technologies, domains, patterns, APIs during interviews
   - **Responsibility boundary**: Research only — does not make design decisions
   - **Tools**: Read, Grep, Glob, WebSearch, WebFetch
@@ -221,9 +221,9 @@ content: |
   - **Input contract**: Topic to investigate + any specific questions
   - **Output contract**: Structured report (Summary, Key Facts, Recommendations, Risks, Sources). Saves to specified path if Write is available, otherwise returns in response.
   - **Fallback**: If WebSearch/WebFetch denied, uses training knowledge with disclaimer
-  
+
   ### architect
-  
+
   - **Purpose**: Analyze codebases and design technical architecture with module decomposition
   - **Responsibility boundary**: Architecture and structure — does not implement code
   - **Tools**: Read, Grep, Glob, Bash
@@ -232,9 +232,9 @@ content: |
   - **Background**: no
   - **Input contract**: Interview context + research findings + guiding principles + constraints. Mode: "analyze" (existing codebase) or "design" (new system).
   - **Output contract**: Architecture document with component map, module specs (Provides/Requires/Boundary Rules), data flow, interface contracts. Writes to plan/architecture.md and plan/modules/*.md.
-  
+
   ### decomposer
-  
+
   - **Purpose**: Break module specs into atomic work items
   - **Responsibility boundary**: Decomposition only — works within the architecture defined by the architect
   - **Tools**: Read, Grep, Glob
@@ -243,9 +243,9 @@ content: |
   - **Background**: no
   - **Input contract**: Module spec + architecture doc + guiding principles + constraints + relevant research
   - **Output contract**: Set of work items in standard format. Each has: objective, machine-verifiable acceptance criteria, non-overlapping file scope, dependencies, implementation notes, complexity. Explicit 100% coverage statement.
-  
+
   ### code-reviewer
-  
+
   - **Purpose**: Review code for correctness, quality, security, and acceptance criteria satisfaction
   - **Responsibility boundary**: Code quality — does not assess spec adherence (that's spec-reviewer)
   - **Tools**: Read, Grep, Glob, Bash
@@ -254,9 +254,9 @@ content: |
   - **Background**: no
   - **Input contract**: Work item spec (incremental) or full project scope (comprehensive) + architecture doc + guiding principles
   - **Output contract**: Verdict (Pass/Fail), findings by severity (Critical/Significant/Minor) with file:line references and suggested fixes. No praise — only problems.
-  
+
   ### spec-reviewer
-  
+
   - **Purpose**: Verify implementation matches the plan, architecture, and guiding principles
   - **Responsibility boundary**: Adherence — does not assess code quality
   - **Tools**: Read, Grep, Glob
@@ -265,9 +265,9 @@ content: |
   - **Background**: no
   - **Input contract**: All work items + architecture doc + module specs + guiding principles
   - **Output contract**: Deviations from architecture (with evidence), unmet acceptance criteria, principle violations, undocumented additions.
-  
+
   ### gap-analyst
-  
+
   - **Purpose**: Find what's missing — not what's wrong with what exists, but what doesn't exist at all
   - **Responsibility boundary**: Completeness — does not assess quality of existing code
   - **Tools**: Read, Grep, Glob
@@ -276,9 +276,9 @@ content: |
   - **Background**: no
   - **Input contract**: Interview transcript + guiding principles + full plan + project source code
   - **Output contract**: Gaps by category (missing requirements, unhandled edge cases, incomplete integrations, missing infrastructure, implicit requirements). Each with severity and recommendation (address now vs defer + rationale).
-  
+
   ### journal-keeper
-  
+
   - **Purpose**: Synthesize project history from all available artifacts
   - **Responsibility boundary**: Synthesis — does not produce new findings, connects existing ones
   - **Tools**: Read, Grep, Glob
@@ -287,9 +287,9 @@ content: |
   - **Background**: no
   - **Input contract**: journal.md + all reviews (incremental and final) + guiding principles + plan overview
   - **Output contract**: Decision log (chronological: decision, rationale, alternatives, implications) + open questions (question, impact, who answers, consequence of inaction). Does not duplicate other reviewers' content.
-  
+
   ### domain-curator
-  
+
   - **Purpose**: Distill policies, decisions, and open questions from review artifacts into the domain knowledge layer
   - **Responsibility boundary**: Domain synthesis only — reads archive, writes domains/; does not produce new review findings
   - **Tools**: Read, Write, Glob
@@ -298,9 +298,9 @@ content: |
   - **Background**: no
   - **Input contract**: artifact_dir + cycle number + archive/cycles/{NNN}/*.md + existing domains/
   - **Output contract**: Updated domains/{name}/policies.md, decisions.md, questions.md with citations to source archive files; updated domains/index.md cycle number.
-  
+
   ### proxy-human
-  
+
   - **Purpose**: Act as human decision-maker during autonomous autopilot cycles when the human is absent
   - **Responsibility boundary**: Andon decisions only — makes binding decisions when executing agents cannot resolve from existing artifacts
   - **Tools**: Read, Grep, Glob, Bash
@@ -309,32 +309,32 @@ content: |
   - **Background**: no
   - **Input contract**: artifact_dir + andon_event description + cycle_number
   - **Output contract**: Decision (PROCEED | DEFER | ESCALATE), rationale, principles cited, confidence level. Appends structured entry to proxy-human-log.md.
-  
+
   ---
-  
+
   ## 5. MCP Artifact Server
-  
+
   Ideate includes a built-in MCP server (`mcp/artifact-server/`) that provides structured data access to the artifact directory. The server runs as a stdio transport, registered via `.mcp.json`.
-  
+
   ### v3 Architecture
-  
+
   **Source of truth**: YAML files in `.ideate/` directory, organized by artifact type (one file per artifact).
-  
+
   **Directory structure**: Cross-cycle artifacts (work items, policies, decisions, questions, principles, constraints, modules, research) live as flat files directly under `.ideate/{type}/`. Cycle-scoped artifacts (findings, journal entries) live under `.ideate/cycles/{NNN}/`. There is no `archive/` prefix — `cycles/` is a top-level subdirectory of `.ideate/`.
-  
+
   **Runtime index**: SQLite database at `.ideate/index.db` (gitignored). Rebuilt from YAML files on startup using content-hash-based incremental comparison. WAL mode for concurrent reads. FK enforcement enabled per connection (`PRAGMA foreign_keys = ON`).
-  
-  **Schema (v1)**: Class table inheritance — `nodes` base table (id, type, cycle_created, cycle_modified, content_hash, token_count, file_path, status) + 12 extension tables (work_items, findings, domain_policies, domain_decisions, domain_questions, guiding_principles, constraints, module_specs, research_findings, journal_entries, metrics_events, document_artifacts). Each extension table PK is FK to `nodes(id)` with `ON DELETE CASCADE`. `edges` table references `nodes(id)` for both source and target with `ON DELETE CASCADE`. `node_file_refs` references `nodes(id)` with `ON DELETE CASCADE`. 10 edge types defined in `EDGE_TYPE_REGISTRY` with application-level type validation.
-  
+
+  **Schema (v5)**: Class table inheritance — `nodes` base table (id, type, cycle_created, cycle_modified, content_hash, token_count, file_path, status) + 16 extension tables (work_items, findings, domain_policies, domain_decisions, domain_questions, guiding_principles, constraints, module_specs, research_findings, journal_entries, metrics_events, document_artifacts, interview_questions, proxy_human_decisions, projects, phases). Each extension table PK is FK to `nodes(id)` with `ON DELETE CASCADE`. `edges` table references `nodes(id)` for both source and target with `ON DELETE CASCADE`. `node_file_refs` references `nodes(id)` with `ON DELETE CASCADE`. 16 edge types defined in `EDGE_TYPE_REGISTRY` with application-level type validation.
+
   **Rebuild pipeline**: On startup, scans all YAML files → parses → upserts into `nodes` + extension table (two-pass insert per artifact, `PRAGMA defer_foreign_keys = ON` during rebuild transaction) → extracts inline edges → runs Kahn's DAG validation. Stale row deletion is a single `DELETE FROM nodes WHERE id NOT IN (...)` — CASCADE handles extension tables, edges, and file refs. File watcher (500ms debounce) triggers incremental rebuilds on changes.
-  
+
   **Query approach**: Hybrid — Drizzle ORM for type-safe CRUD (inserts, single-table selects, deletes), raw `db.prepare()` for graph traversal (recursive CTEs, multi-table JOINs across nodes + extensions + edges).
-  
-  **Tools (17)**: Organized in `src/tools/` directory. `ToolContext` interface provides `db`, `drizzleDb`, and `ideateDir` to all tool handlers. Write tools write YAML first (GP-8), then synchronously upsert affected SQLite rows.
+
+  **Tools (22)**: Organized in `src/tools/` directory. `ToolContext` interface provides `db`, `drizzleDb`, and `ideateDir` to all tool handlers. Write tools write YAML first (GP-8), then synchronously upsert affected SQLite rows.
 
   | Tool | Category | File |
   |------|----------|------|
-  | `ideate_get_work_item_context` | Context assembly | tools/context.ts |
+  | `ideate_get_artifact_context` | Context assembly | tools/context.ts |
   | `ideate_get_context_package` | Context assembly | tools/context.ts |
   | `ideate_assemble_context` | Context assembly | tools/context.ts |
   | `ideate_get_config` | Configuration | tools/index.ts (handler inline; reads src/config.ts) |
@@ -356,58 +356,58 @@ content: |
   | `ideate_bootstrap_workspace` | Bootstrap | tools/bootstrap.ts |
   | `ideate_manage_autopilot_state` | Autopilot | tools/autopilot-state.ts |
   | `ideate_update_config` | Configuration | tools/config.ts |
-  
+
   Session orchestration and remote work dispatch remain in external MCP servers.
-  
+
   ---
-  
+
   ## 6. Module Decomposition Protocol
-  
+
   ### When to Use Modules
-  
+
   - **Skip modules**: Projects with fewer than 5 logical components. Decompose directly from architecture to work items.
   - **Use modules**: Projects with 5+ components, or any project where components have non-trivial interfaces between them.
-  
+
   ### Module Spec Format
-  
+
   ```markdown
   # Module: {Name}
-  
+
   ## Scope
   What this module is responsible for. What it is NOT responsible for.
-  
+
   ## Provides
   - `{export/interface}` — {description, signature if applicable}
-  
+
   ## Requires
   - `{import/dependency}` (from: {module-name}) — {what it needs and why}
-  
+
   ## Boundary Rules
   - {Constraints on this module's behavior}
   - {What it may and may not access}
   - {Performance/security requirements specific to this module}
-  
+
   ## Internal Design Notes
   Optional: data models, key algorithms, implementation approach.
   Not binding — the decomposer may refine these when creating work items.
   ```
-  
+
   ### Interface Contract Rules
-  
+
   1. Every `Provides` entry in one module that is referenced as a `Requires` by another module must have a matching signature/contract.
   2. Contracts are defined at the module level BEFORE work items are created. Work items implement the contracts; they do not define them.
   3. If two modules disagree on an interface (discovered during decomposition), the architect must resolve the conflict before work items are finalized.
-  
+
   ### 100% Coverage Check
-  
+
   After decomposition, the plan skill verifies:
   1. Every module's scope is fully covered by its work items (no gaps)
   2. Every work item maps to exactly one module (no orphans)
   3. The union of all module scopes equals the full project scope defined in the architecture
   4. No work item's file scope overlaps with another's (unless sequenced by dependency)
-  
+
   ### Parallel Decomposition Flow
-  
+
   ```
   architect produces:
     plan/architecture.md (components, relationships)
@@ -428,13 +428,13 @@ content: |
         ▼
   final plan/work-items/*.md
   ```
-  
+
   ---
-  
+
   ## 7. Continuous Review Architecture
-  
+
   ### Review Layers
-  
+
   ```
   Layer 1: INCREMENTAL (per work item, during execute)
     Trigger: work item completion
@@ -442,7 +442,7 @@ content: |
     Scope: files created/modified by that work item
     Output: archive/incremental/NNN-{name}.md
     Blocking: only if critical issues found
-  
+
   Layer 2: CAPSTONE (end of cycle, during review)
     Trigger: user runs /ideate:review
     Agents: code-reviewer, spec-reviewer, gap-analyst, journal-keeper (parallel); domain-curator (post-synthesis)
@@ -450,11 +450,11 @@ content: |
     Output: archive/cycles/{NNN}/*.md + archive/cycles/{NNN}/summary.md
     Purpose: cross-cutting concerns, full-picture assessment
   ```
-  
+
   ### Incremental Review During Execution
-  
+
   When a work item completes (in any execution mode):
-  
+
   1. The execute skill spawns `code-reviewer` with the work item spec and list of files touched
   2. Review runs while other work items continue (non-blocking for other items)
   3. Review result written to `archive/incremental/NNN-{name}.md`
@@ -462,97 +462,97 @@ content: |
      - **Minor**: Execute skill fixes immediately, notes rework in journal
      - **Significant within scope**: Execute skill fixes, notes in journal
      - **Critical or scope-changing**: Added to Andon cord queue
-  
+
   ### Andon Cord Mechanism
-  
+
   ```
   During execution, issues accumulate in a queue:
     - Unresolvable gaps (guiding principles don't answer)
     - Scope-changing review findings
     - Contradictions between work items discovered at runtime
     - Missing dependencies or incorrect interface contracts
-  
+
   Queue is presented to user at:
     - Natural pause points (between dependency groups)
     - When a blocking issue prevents progress
     - At user request
-  
+
   User response options:
     - Answer the question → recorded in journal, execution continues
     - Defer → noted in journal, work continues around it
     - Stop → execution pauses for full re-evaluation
   ```
-  
+
   ### Capstone Review Integration
-  
+
   The capstone review (layer 2) accounts for incremental reviews:
   - spec-reviewer and gap-analyst read `archive/incremental/` to know what was already caught
   - The capstone focuses on what per-item reviews CAN'T see: cross-module consistency, architectural coherence, integration completeness, overall principle adherence
   - Findings that duplicate incremental reviews are omitted
-  
+
   ---
-  
+
   ## 8. Artifact Directory Contract
-  
+
   ### Complete File Specification
-  
+
   #### `.ideate/config.json`
   - **Purpose**: Identifies the schema version of the `.ideate/` artifact directory and stores optional project metadata
   - **Format**: `{"schema_version": 2, "project_name": "<optional>"}` — only `schema_version` is required
   - **Semantics**: Written once during `/ideate:init` directory scaffolding. Read by the MCP server on startup to locate and validate the artifact directory. Updated only by migration scripts when the schema version advances.
   - **Phases**: init (write), runtime (read by MCP server)
-  
+
   #### `steering/interview.md`
   - **Purpose**: Record of the planning conversation
   - **Format**: Alternating Q: and A: blocks capturing substance of each exchange
   - **Semantics**: Init writes initial; refine appends new section with date header and context
   - **Phases**: init (write), execute (read), review (read), refine (append)
-  
+
   #### `steering/guiding-principles.md`
   - **Purpose**: Decision framework — the "why" behind the project
   - **Format**: Numbered principles, each with name and one-paragraph explanation
   - **Semantics**: Init writes initial (5-15 principles). Refine updates with change notes. Deprecated principles marked, never silently deleted.
   - **Phases**: init (write), execute (read), review (read), refine (update)
-  
+
   #### `steering/constraints.md`
   - **Purpose**: Hard boundaries on technology, design, and process
   - **Format**: Categorized list of constraints
   - **Semantics**: Init writes initial. Refine may add or update constraints.
   - **Phases**: init (write), execute (read), review (read), refine (update)
-  
+
   #### `steering/research/{topic-slug}.md`
   - **Purpose**: Background research findings on specific topics
   - **Format**: Structured report (Summary, Key Facts, Recommendations, Risks, Sources)
   - **Naming**: kebab-case topic slug (e.g., `session-multiplexing.md`)
   - **Semantics**: Written by researcher agents during init or refine. Never overwritten — new research on the same topic gets a new file with a suffix.
   - **Phases**: plan (write), execute (read), review (read), refine (write)
-  
+
   #### `plan/overview.md`
   - **Purpose**: High-level summary of what's being built
   - **Format**: Prose with structural diagrams
   - **Semantics**: Init writes full project overview. Refine overwrites with a change plan focused on the delta.
   - **Phases**: init (write), execute (read), review (read), refine (overwrite)
-  
+
   #### `plan/architecture.md`
   - **Purpose**: Technical architecture — components, relationships, data flow, interfaces
   - **Format**: Structured sections with component map, data flow diagrams, interface definitions
   - **Semantics**: Init writes initial. Refine updates only if architecture changes.
   - **Phases**: init (write), execute (read), review (read), refine (update if changed)
-  
+
   #### `plan/modules/{name}.md`
   - **Purpose**: Intermediate decomposition — module scope, interfaces, boundary rules
   - **Format**: Module spec (Scope, Provides, Requires, Boundary Rules, Internal Design Notes)
   - **Naming**: kebab-case module name matching architecture.md references
   - **Semantics**: Written during init. Updated during refine if module scope changes.
   - **Phases**: init (write), execute (read), review (read), refine (update)
-  
+
   #### `plan/execution-strategy.md`
   - **Purpose**: How agents execute the plan — mode, parallelism, worktrees, grouping
   - **Format**: Structured fields (Mode, Parallelism, Worktrees, Review Cadence, Work Item Groups, Agent Configuration)
   - **Valid modes**: Sequential, Batched parallel, Full parallel (teams)
   - **Semantics**: Init writes initial. Refine writes new strategy for the refinement cycle.
   - **Phases**: init (write), execute (read), review (read), refine (overwrite)
-  
+
   #### `plan/work-items/NNN-{name}.md`
   - **Purpose**: Atomic executable task specification
   - **Format**: Objective, Acceptance Criteria, File Scope, Dependencies, Implementation Notes, Complexity
@@ -560,46 +560,46 @@ content: |
   - **Numbering**: Sequential within a cycle. Refine continues from highest existing number.
   - **Constraints**: Non-overlapping file scope between concurrent items. Dependencies form a DAG. Acceptance criteria machine-verifiable where possible.
   - **Phases**: init (write), execute (read + mark criteria), review (read), refine (write new)
-  
+
   #### `archive/incremental/NNN-{name}.md`
   - **Purpose**: Per-work-item review results from execution phase
   - **Format**: Verdict (Pass/Fail), findings by severity with file:line references
   - **Naming**: Matches work item number and name
   - **Phases**: execute (write), review (read), refine (read)
-  
+
   #### `archive/cycles/{NNN}/code-quality.md`
   - **Purpose**: Comprehensive code review findings
   - **Phases**: review (write), refine (read)
-  
+
   #### `archive/cycles/{NNN}/spec-adherence.md`
   - **Purpose**: Architecture/principle/criteria adherence check
   - **Phases**: review (write), refine (read)
-  
+
   #### `archive/cycles/{NNN}/gap-analysis.md`
   - **Purpose**: Missing requirements and blind spots
   - **Phases**: review (write), refine (read)
-  
+
   #### `archive/cycles/{NNN}/decision-log.md`
   - **Purpose**: Synthesized history of decisions and open questions
   - **Phases**: review (write), refine (read)
-  
+
   #### `archive/cycles/{NNN}/summary.md`
   - **Purpose**: Cross-reviewer synthesis with prioritized findings and refinement recommendations
   - **Format**: Findings by severity, mapped to principles/work items, user-input items separated, proposed refinement plan
   - **Phases**: review (write), refine (read)
-  
+
   #### `journal.md`
   - **Purpose**: Running log of all project activity
   - **Format**: Phase-tagged entries with dates. Format: `## [{phase}] {date} — {title}`
   - **Semantics**: STRICTLY APPEND-ONLY. No phase ever edits or deletes existing entries.
   - **Phases**: init (write), execute (append per item), review (append), refine (append)
-  
+
   ---
-  
+
   ## 9. Source Code Index
-  
+
   Key exports per source file. Format: file path relative to project root, language, key exported symbols.
-  
+
   | File | Language | Key Exports |
   |------|----------|-------------|
   | mcp/artifact-server/src/config.ts | TypeScript | CONFIG_SCHEMA_VERSION, IdeateConfigJson, IdeateConfig, readIdeateConfig, findIdeateConfig, resolveArtifactDir, createIdeateDir, writeConfig |
@@ -618,5 +618,5 @@ content: |
   | mcp/artifact-server/src/index.ts | TypeScript | (MCP server entry point — no public exports) |
   | scripts/migrate-to-v3.ts | TypeScript | MigrationContext, sha256, toYaml, buildArtifact, parsePrinciples, parseYamlFlowArray, parseWorkItemsYaml, migrateJournal, migrateArchiveCycles, extractSection, migratePlanArtifacts, migrateSteeringArtifacts, migrateInterviews, migrateMetrics, MigrationOptions, runMigration |
   | scripts/migrate-to-v3.js | JavaScript | sha256, toYaml, buildArtifact, parsePrinciples, parseYamlFlowArray, parseWorkItemsYaml, migrateJournal, migrateArchiveCycles, extractSection, migratePlanArtifacts, migrateSteeringArtifacts, migrateInterviews, migrateMetrics, runMigration |
-content_hash: "865b9d379ec7296443142f927413d4f4d2c138dbad064dbcaaca48eeda1a7d99"
-token_count: 7967
+content_hash: 43d38d74f6619f09f636fe3ed996cb479fc8a378255cfa28fe9daeb0f401c8ca
+token_count: 8230

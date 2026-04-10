@@ -1,26 +1,36 @@
 id: overview
 type: overview
-title: Cycle 22 — Open Question Resolution
-change_plan:
-  what_is_changing: "Three targeted improvements driven by open domain questions: (1) remove the heuristic from the ValidationError constructor to make incorrect usage a deterministic compile-time concern rather than a silent runtime surprise; (2) add the two remaining genuine testing gaps from Q-120 (nextId unsupported-type error and deprecated/superseded policy exclusion); (3) close 11 stale open questions whose underlying issues were resolved in prior cycles."
-  triggering_context: "Review of all open domain questions revealed that the bulk of Q-117 through Q-138 were silently resolved in cycles 17–21 but never closed. Three items remain genuinely unresolved: Q-130 (ValidationError heuristic), the two live gaps in Q-120, and the stale-question backlog itself."
-  scope_boundary:
-    in_scope:
-      - src/adapter.ts — ValidationError constructor simplification
-      - Call-site audit across src/adapters/ and src/ppr.ts to verify all sites pass explicit codes
-      - src/__tests__/nextid-cycle-validation.test.ts — unsupported-type test
-      - src/__tests__/tools.test.ts or new test file — deprecated policy exclusion test
-      - MCP artifact updates to close stale questions Q-117, Q-118, Q-120, Q-124, Q-131, Q-132, Q-133, Q-134, Q-135, Q-136, Q-137, Q-138
-    out_of_scope:
-      - Q-122 / Q-128 server-side BFS/PPR alignment (ideate-server, external project)
-      - Q-125 skills .gitkeep (ideate plugin, not mcp/artifact-server)
-      - Q-129 targeted spec compliance review (separate review task)
-      - StorageAdapter migration of remaining 7 direct-DB tool handlers
-      - Any indexer or watcher changes
-  expected_impact: ValidationError misuse becomes a deterministic failure (wrong code string no longer silently degrades to VALIDATION_ERROR). Two test regressions that were undetectable by the suite become detectable. Domain question list shrinks from 19 open to 8 genuinely open.
-  work_items:
-    - WI-733
-    - WI-734
-    - WI-735
-content_hash: d37dfffad9b9de51b0604492e2269cf0cf434220efefa8da10470bdeb88bbe7d
-token_count: 512
+content: |-
+  # Change Plan — Cycle 23 (Full-Audit Correction)
+
+  ## Trigger
+  Full audit review 2026-04-09. 1 critical finding, 6 significant findings across code-reviewer, spec-reviewer, and gap-analyst.
+
+  ## What Is Changing
+
+  1. **WI-736** — `adapter.ts`: Add `import type { EdgeType } from "./schema.js"` (1-line fix for 4 TS2304 build errors)
+  2. **WI-737** — `adapter-contract.test.ts`: Fix 4 TypeScript type errors + add getDomainState deprecated/superseded filter test
+  3. **WI-738** — `indexer.test.ts`: Fix 16 TypeScript errors (untyped drizzle instance)
+  4. **WI-739** — `tests/adapters/always-include-types-validation.test.ts`: Replace hardcoded expectedTypes with structural TypeScript exhaustiveness check (P-59 compliance)
+  5. **WI-740** — Architecture doc (via MCP): Update stale counts (12→16 ext tables, 10→16 edge types, 17→22 tools, v1→v5 schema) + rename `ideate_get_work_item_context` → `ideate_get_artifact_context`
+  6. **WI-741** — `scripts/pretest.js`: Remove `process.exit(1)` calls — advisory stderr warnings only
+
+  ## What Is NOT Changing
+  - Runtime behavior of any adapter or MCP tool
+  - Schema, database, or YAML structure
+  - Any logic beyond the targeted fixes listed above
+
+  ## Scope Boundary
+  - 5 source/test files + 1 artifact-only (architecture doc)
+  - No new features, no architectural changes
+  - All changes are correctness/compliance fixes from the full audit
+
+  ## Expected Impact
+  - `npm run build` succeeds (C1 fix)
+  - `npx tsc --noEmit` reports 0 errors (all TypeScript fixes)
+  - P-59 enforcement becomes self-maintaining (compile-time check)
+  - P-35, P-38 compliance restored (architecture doc update)
+  - P-73 compliance (pretest.js fix)
+  - P-72 compliance (getDomainState contract-level test)
+content_hash: a3607088a4d5944ef212c431ee11d38321f770c66a066e0a2d2137746becd3f5
+token_count: 446

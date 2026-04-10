@@ -1,37 +1,40 @@
 id: spec-adherence
 type: cycle_summary
-cycle: 20
 reviewer: spec-reviewer
+scope: full-audit
+date: "20260409"
 content: |-
-  ## Spec Review — Cycle 20
+  ## Spec Review — Full Audit
 
-  **Verdict**: Pass
-
-  ### Policy Compliance
-  - **P-66**: Met. `belongs_to_cycle` registered in EDGE_TYPES, EDGE_TYPE_REGISTRY, and adapter-contract.md (WI-725).
-  - **P-67**: Met. Both derivation functions implement targeted delete-before-insert scoped to their own edge type.
-  - **P-68**: Substantively met. `hasDerivedEdgeUpdate` covers journal entries, cycle_summary, and work_item file types. Retention of `hasJournalUpdate` causes extra triggering but is not a P-68 violation.
-  - **P-36 / P-50**: Met. All new code paths have corresponding tests.
+  **Verdict**: Fail
 
   ### Significant Findings
 
-  **S1: `indexFiles` retains superseded `hasJournalUpdate` guard — double derivation on journal file changes**
-  - File: `src/indexer.ts:798–803`
-  - WI-727 resolution field states 'hasDerivedEdgeUpdate replaces hasJournalUpdate' but old guard was not removed. Two derivation runs per journal file change.
+  **S1: Architecture doc lists superseded tool name `ideate_get_work_item_context` (P-38 violation)**
+  - **File**: `.ideate/plan/architecture.yaml:337`
+  - Architecture doc Section 5 tool table lists `ideate_get_work_item_context`. Actual registered tool name in `src/tools/index.ts` is `ideate_get_artifact_context` (renamed in WI-506). P-38 requires tool names to be verified from source, not derived docs.
+  - **Fix**: Update architecture.yaml Section 5 tool table to use `ideate_get_artifact_context`.
 
-  **S2: `rebuildIndex` orphaned bare derivation calls at lines 1013–1015**
-  - File: `src/indexer.ts:1013–1015`
-  - Leftover merge artifact from WI-727 rework. Causes double derivation and inflated `stats.edges_created`.
+  **S2: Architecture doc reports stale component counts (P-35 violation)**
+  - **File**: `.ideate/plan/architecture.yaml:327,333`
+  - Says "12 extension tables" (actual: 16 — added `interview_questions`, `proxy_human_decisions`, `projects`, `phases`). Says "10 edge types" (actual: 16). Says "Tools (17)" (actual: 22, and the same document's own table lists 22 — the parenthetical contradicts the table). Schema section header says "Schema (v1)" (actual: v5).
+  - **Fix**: Update Section 5 counts — extension tables → 16, edge types → 16, Tools → 22, schema version → v5.
 
-  ### Minor Findings
+  ### Principle Adherence (Pass)
 
-  **M1: Stale-removal test for `deriveJournalEntryCycleEdges` uses `rebuildIndex` rather than direct call**
-  - File: `src/__tests__/indexer.test.ts:1931–1964`
-  - Test exercises observable outcome correctly but does not isolate whether `deriveJournalEntryCycleEdges` itself removes the stale edge (the full wipe in Phase 2 removes it first). Idempotency test (lines 1865–1928) correctly isolates the function.
-
-  **M2: Duplicate 'Phase 3' comment at `src/indexer.ts:1011` and `1021`**
-
-  ### Acceptance Criteria
-  All acceptance criteria for WI-725, WI-726, WI-727, WI-728 are met.
-content_hash: 9bd4ad107c6ac701d8b1f693798fa22deb948de9e6a4f3007061401c437c7055
-token_count: 458
+  - P-06: Skills use MCP tools only — confirmed across sampled skill files.
+  - P-26: SQLite is derived — YAML write precedes SQLite transaction in `writer.ts:625-661`.
+  - P-33: Tool descriptions have no file paths — 8 of 22 sampled, all clean.
+  - P-34: Tool descriptions under 50 words — all sampled compliant.
+  - P-42: `handleWriteArtifact` validates artifact type at `write.ts:227-231`.
+  - P-44: Atomic two-phase write pattern confirmed in `writer.ts`.
+  - P-47: Absolute paths via `resolveArtifactPath` using `path.join(ideateDir, ...)` at `writer.ts:546,654`.
+  - P-53: `adapter-contract.md` has no YAML/SQLite/file extension references.
+  - P-66: All 16 edge types in EDGE_TYPES, EDGE_TYPE_REGISTRY, and adapter-contract.md — in sync.
+  - P-67: Both derivation functions delete-before-insert.
+  - P-68: Trigger guards cover journal entries, cycle summaries, and work items.
+  - P-69: No stale `hasJournalUpdate` guard; `rebuildIndex` calls each derivation function exactly once.
+  - P-16: `plugin.json` and `marketplace.json` both at version `3.10.0`.
+cycle: 20
+content_hash: fb5b65f35437821a567c60b3764809f8357900b72d8904fb7abfac6d601ff0c1
+token_count: 594

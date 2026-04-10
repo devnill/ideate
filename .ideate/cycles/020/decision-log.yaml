@@ -1,44 +1,53 @@
 id: decision-log
 type: cycle_summary
-cycle: 20
 reviewer: journal-keeper
+scope: full-audit
+date: "20260409"
 content: |-
-  ## Decision Log — Cycle 20
+  ## Decision Log — Full Audit (2026-04-09)
 
-  ### Decisions Made
+  ### Confirmed Issues
 
-  **D1 — Register `belongs_to_cycle` in the edge type system (WI-725)**
-  `belongs_to_cycle` added to EDGE_TYPES, EDGE_TYPE_REGISTRY, and adapter-contract.md. P-66 compliance. No rework.
+  **C1 — Build-breaking: EdgeType not in scope in adapter.ts**
+  Line 96 uses `export type { EdgeType }` which does not bring `EdgeType` into local scope under NodeNext module resolution. Four interface definitions reference `EdgeType` directly. `npm run build` will fail with 4 TS2304 errors. Fix: add `import type { EdgeType } from "./schema.js"` to adapter.ts.
 
-  **D2 — Apply delete-before-insert in `deriveJournalEntryCycleEdges` (WI-726)**
-  Function made idempotent per P-67. One rework pass to correct scoping of delete step.
+  **S1 — TypeScript errors in test files (CI blocker)**
+  18 TypeScript errors across `adapter-contract.test.ts` and `indexer.test.ts` caught by `tsc --noEmit` but masked by vitest esbuild.
 
-  **D3 — Expand `hasDerivedEdgeUpdate` trigger guard in `indexFiles` (WI-727)**
-  Replaced narrow `hasJournalUpdate` with broader guard covering journal, cycle_summary, and work_item files. P-68 compliance. One rework pass plus merge cleanup gap that left dead code in place.
+  **S2-spec — Architecture doc stale counts**
+  12 extension tables (actual 16), 10 edge types (actual 16), Tools(17) (actual 22), Schema v1 (actual v5).
 
-  **D4 — Restrict comma-split to `derived_from` only (WI-728)**
-  Comma-split path in `extractEdges` gated on `spec.yaml_field === 'derived_from'`. No rework.
+  **S1-spec — Superseded tool name**
+  `ideate_get_work_item_context` in architecture doc (actual: `ideate_get_artifact_context`).
 
-  ### Execution Notes
+  **SF3 — pretest.js blocks npm test**
+  `process.exit(1)` in pretest.js blocks fresh-checkout `npm test`.
 
-  WI-727 rework that resolved a duplicate `deriveJournalEntryEdges` definition left two merge artifacts: (1) bare calls at rebuildIndex lines 1013–1015, (2) old `hasJournalUpdate` block at indexFiles lines 798–803. These are the root cause of both post-review significant findings.
+  ### Cross-Reviewer Correlations
 
-  ### Review Findings Summary
+  **CR1: P-59 ALL_NODE_TYPES exhaustiveness** (code-reviewer S2 + gap-analyst SF1)
+  Both flag the same gap: the hardcoded `expectedTypes` list in the sync test cannot self-enforce P-59. A type-level exhaustiveness check would make the test self-maintaining.
 
-  All three reviewers independently converged on the same two significant issues:
-  - **S1**: Orphaned bare derivation calls in `rebuildIndex` (lines 1013–1015) — double execution, inflated `stats.edges_created`
-  - **S2**: `hasJournalUpdate` guard retained alongside `hasDerivedEdgeUpdate` in `indexFiles` (lines 798–803) — double derivation on journal file changes
+  **CR2: Architecture doc staleness as systemic pattern** (code-reviewer C1 + spec-reviewer S2)
+  Edge type count in architecture doc (10) matches the count when EdgeType was first defined; the actual count grew to 16 without a doc update. Both C1 and S2 trace to the same schema evolution event being incompletely propagated.
 
-  P-67 prevents data corruption in both cases. Fix: delete lines 1013–1015 and lines 798–803, relabel Phase 3/4 comments.
+  **CR3: getDomainState deprecation gap** (gap-analyst SF2 + adapter-contract.md)
+  Gap-analyst characterizes the deprecated/superseded filter as a contract-level gap; adapter-contract.md does not include a deprecation notice. Minor contradiction requires clarification.
 
-  ### Connections to Prior Cycles
+  ### Open Questions for User
 
-  Cycle 20 is the first implementation cycle for P-66, P-67, P-68 (all established in cycle 19). P-67 acted as a safety net — without it, S1 and S2 would be data-corruption bugs rather than stats/performance issues. The policies are working as a system.
+  1. EdgeType import omission — is `dist/` a pre-regression build? Mechanical fix (one line) but must be done before next merge.
+  2. Should ALL_NODE_TYPES use a type-level exhaustiveness check?
+  3. Are the 18 TypeScript errors in test files known? Is there a tsconfig exclusion plan?
+  4. Architecture doc update — work item now, or deferred maintenance pass?
+  5. Is getDomainState deprecated? If so, contract doc needs a deprecation notice.
+  6. How should pretest.js be fixed to not block fresh-checkout npm test?
+  7. What is the implementation timeline for the 9 merge-design decisions from WI-717?
+  8. What is the timeline for implementing graph edge coverage improvements from WI-715?
 
-  ### Open Questions
-  - **OQ-1**: Cleanup of lines 1013–1015 and 798–803 required before cycle closes
-  - **OQ-2**: Add `stats.edges_created` accuracy test after S1 is fixed (not before — would assert inflated value)
-  - **OQ-3**: Add formal P-49 backfill assessment note to WI-725 record
-  - **OQ-4**: Q-117 and Q-118 remain open, unaffected by cycle 20 work
-content_hash: d4bedd791636ce831d5675003cd13451a40e89e3f75beecc7fd21da212478b2a
-token_count: 602
+  ### Project Health Assessment
+
+  The StorageAdapter validation layer is complete and correct. 1166 tests pass with 0 failures. Two items require immediate action before the next build: (1) EdgeType import omission in adapter.ts is build-breaking, and (2) architecture doc has diverged significantly from the actual system. The graph curation analysis (PH-038) surfaced three substantive deferred items: sparse edge connectivity, non-canonical legacy node types, and a multi-.ideate merge design blocked on 9 user decisions.
+cycle: 20
+content_hash: fe2dbe215705ee4b3e0b160c37832e03343727c45ad3ffb79c6564cc4a0a4d35
+token_count: 821

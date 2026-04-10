@@ -1,58 +1,95 @@
 id: summary
 type: cycle_summary
-cycle: 20
+scope: full-audit
+date: "20260409"
 content: |-
-  # Review Summary — Cycle 20
+  # Review Summary — Full Audit (2026-04-09)
 
   ## Overview
-  Cycle 20 implemented four policy-compliance fixes to the indexer (P-66, P-67, P-68, and comma-split scope restriction). All four work items completed with acceptance criteria met. Post-review identified two significant merge artifacts from WI-727's rework pass: orphaned bare derivation calls in `rebuildIndex` and the old `hasJournalUpdate` guard left alongside the new `hasDerivedEdgeUpdate` guard in `indexFiles`. Both cause double-execution of derivation functions; data correctness is preserved by P-67 but `stats.edges_created` is inflated and incremental performance is degraded.
+
+  The StorageAdapter validation layer (PR-002, PH-037) is complete and functionally correct. The full test suite passes (1166 tests, 0 failures). This audit found one build-breaking TypeScript import omission, two significant architecture doc staleness violations, and three significant testing/tooling gaps. No data-correctness issues were found.
 
   ## Phase Convergence
-  Phase: PH-039
-  Cycles completed in this phase: 1 / 5 (threshold)
-  Convergence status: First cycle — no trend data
 
-  Trend: First cycle in phase. Two significant findings, both merge cleanup artifacts from a single work item (WI-727). Addressable in one targeted commit.
+  Phase: PH-017
+  Convergence status: Not assessed (full audit — cycle-level tracking not applicable)
 
   ## Project Progress
 
   | Success Criterion | Status |
   |---|---|
-  | `belongs_to_cycle` edge type registered in all three required locations | pass |
-  | `deriveJournalEntryCycleEdges` implements delete-before-insert (P-67) | pass |
-  | `indexFiles` trigger guard covers all upstream artifact types (P-68) | partial — old guard not removed, causing double-trigger |
-  | Comma-split restricted to `derived_from` field only | pass |
-  | All tests pass (1162 tests) | pass |
+  | StorageAdapter interface defined and documented in adapter-contract.md | pass |
+  | LocalAdapter implements all StorageAdapter methods | pass |
+  | RemoteAdapter implements all StorageAdapter methods | pass |
+  | deleteNode correctness (YAML rollback on SQLite failure) | pass |
+  | All write handlers use atomic write patterns (P-44) | pass |
+  | Adapter equivalence tests cover CRUD, traversal, journal, query | pass |
+  | 1166 tests passing, 0 failures | pass |
+  | npm run build produces clean build artifact | fail — EdgeType import omission (C1) |
+  | Architecture doc current with implementation (P-35, P-38) | fail — stale counts + renamed tool |
+  | P-59 ALL_NODE_TYPES sync enforced by self-maintaining test | partial — test uses hardcoded list |
 
   ## Critical Findings
-  None.
+
+  - [code-reviewer] **`EdgeType` not imported in `adapter.ts`** — `export type { EdgeType }` at line 96 does not bring the name into local scope under NodeNext resolution. Four interface definitions (`Edge`, `GraphQuery`, `QueryResult`, `StorageAdapter.removeEdges`) use `EdgeType` and will fail with TS2304 on `npm run build`. Fix: add `import type { EdgeType } from "./schema.js"` at line 98. Relates to: cross-cutting (schema-adapter boundary)
 
   ## Significant Findings
-  - [code-reviewer] Orphaned bare derivation calls in `rebuildIndex` lines 1013–1015 cause both `deriveJournalEntryEdges` and `deriveJournalEntryCycleEdges` to run twice per rebuild; `stats.edges_created` is inflated — relates to: WI-727, P-67
-  - [code-reviewer] `hasJournalUpdate` guard (lines 798–803) retained alongside `hasDerivedEdgeUpdate` in `indexFiles`; journal file changes trigger four derivation calls instead of two — relates to: WI-727, P-68
+
+  - [code-reviewer] **18 TypeScript errors in test files not caught by vitest** — `adapter-contract.test.ts` (4 errors) and `indexer.test.ts` (14 errors) fail `tsc --noEmit`. Vitest masks them via esbuild. CI `tsc` checks fail. Relates to: cross-cutting
+
+  - [code-reviewer] **P-59 sync test uses hardcoded `expectedTypes` list** — test in `always-include-types-validation.test.ts` can pass even if `NodeType` union diverges from `ALL_NODE_TYPES`, as long as `expectedTypes` is also not updated. Self-enforcing alternative required. Relates to: P-59
+
+  - [spec-reviewer] **Architecture doc lists superseded tool name** — `ideate_get_work_item_context` at `architecture.yaml:337`; actual registered name is `ideate_get_artifact_context`. P-38 violation. Relates to: P-38
+
+  - [spec-reviewer] **Architecture doc stale component counts** — extension tables 12 (actual 16), edge types 10 (actual 16), tools 17 (actual 22), schema v1 (actual v5). P-35 violation. Relates to: P-35
+
+  - [gap-analyst] **No test verifying `ALL_NODE_TYPES` exhaustively covers `NodeType` union** — zero grep hits for `ALL_NODE_TYPES` in `src/__tests__/`. A type missed in the array causes silent `INVALID_NODE_TYPE` failures. P-59 gap. Relates to: P-59
+
+  - [gap-analyst] **`getDomainState` deprecated/superseded filter untested at adapter-contract level** — WI-734 verified the SQL filter via tool-level test only. `adapter-contract.test.ts` has no assertion that deprecated/superseded policies are excluded from `getDomainState` results. Fix: add contract-level test. Relates to: WI-734
+
+  - [gap-analyst] **`pretest.js` calls `process.exit(1)`, blocking `npm test` in fresh checkouts** — script comment says "advisory-only" but code calls exit on ENOENT or stale JS. Fresh-checkout CI silently runs zero tests. Relates to: cross-cutting
 
   ## Minor Findings
-  - [gap-analyst] No test asserts `stats.edges_created` accuracy when derived edges are present; inflated count went undetected by test suite — relates to: WI-727 → carry-forward
-  - [gap-analyst] WI-725 has no explicit P-49 backfill assessment; implicit conclusion (no backfill needed for runtime-derived edges) is correct but undocumented — relates to: WI-725, P-49 → carry-forward
-  - [spec-reviewer] Duplicate 'Phase 3' comment label at indexer.ts lines 1011 and 1021 — relates to: cross-cutting → carry-forward
-  - [gap-analyst] Pre-existing test coverage gap: `review_output` and `domain_index` types absent from document-type coverage test loop (indexer.test.ts:1154) — relates to: cross-cutting → carry-forward
+
+  - [code-reviewer] `handleUpdateWorkItems` pushes to `failures` before re-throwing — dead code (`write.ts:322-326`) → carry-forward
+  - [code-reviewer] `batchMutate` stores `cycle_modified: null` inconsistently vs `putNode` (`writer.ts:1314`) → carry-forward
+  - [code-reviewer] `batchMutate` scope collision detection ignores existing DB nodes (`writer.ts:1176-1232`) → carry-forward
+  - [code-reviewer] `deleteNode` silent split-brain path when rollback fails with null `originalContent` (`writer.ts:901-906`) → carry-forward
+  - [code-reviewer] `tsconfig.json` excludes only `migrate.test.ts`; 18-error test files still included (`tsconfig.json:16`) → carry-forward
+  - [gap-analyst] Equivalence test files listed in `adapter-contract.md:671-675` do not exist → carry-forward
+  - [gap-analyst] ValidationError constructor signature change has no dedicated regression test → carry-forward
+  - [gap-analyst] Q-125 ("skills directories contain only .gitkeep") is stale → carry-forward
+  - [gap-analyst] Watcher→indexer integration test does not cover derivation phase (P-24 gap) → carry-forward
+  - [gap-analyst] No architecture document for artifact server component structure → carry-forward
 
   ## Suggestions
-  - [gap-analyst] Q-117 (burst writes) and Q-118 (hash-check table scans) unaffected by cycle 20; continue aging without new information unless explicitly scheduled
+
+  - [gap-analyst] Review `ALLOWLISTED_COMMANDS` in `hooks.ts` (`cat`, `ls`) for necessity
+  - [gap-analyst] `adapter-contract.test.ts` getDomainState test does not assert `decisions` and `questions` arrays present
 
   ## Findings Requiring User Input
-  None — all findings can be resolved from existing context.
+
+  1. **EdgeType import omission** — Mechanical one-line fix. Should this be a standalone work item or part of the next refinement batch?
+  2. **Architecture doc staleness** — Schedule as dedicated work item now, or defer to a future documentation pass?
+  3. **TypeScript errors in test files** — Is there a CI `tsc` check currently? Are these errors known? Fix strategy: exclude test files from tsconfig, or fix the type assertions?
+  4. **pretest.js behavior** — Fix to advisory-only (remove `process.exit(1)`), or intentional design?
+  5. **P-59 test approach** — Hardcoded list (current) vs type-level exhaustiveness check?
 
   ## Proposed Refinement Plan
-  Two significant findings require a refinement cycle. Both trace to a single root cause (WI-727 merge cleanup gap) and can be fixed in one targeted work item:
 
-  **Fix scope**:
-  - Remove bare derivation calls from `rebuildIndex` lines 1013–1015
-  - Remove `hasJournalUpdate` block from `indexFiles` lines 798–803
-  - Relabel Phase 3/4 comments consistently
-  - Add one `stats.edges_created` accuracy test (after bare-call removal)
-  - Add P-49 backfill assessment note to WI-725 resolution
+  The review identified 1 critical and 6 significant findings requiring a refinement cycle:
 
-  Estimated scope: 1 work item, low complexity. No architecture changes needed.
-content_hash: c7341bbfdc44675c5e3f0883830133b831cfa64601ec0fe3a3a0f1293dc7cf7c
-token_count: 900
+  **Immediate (before next build):**
+  - Fix EdgeType import omission in adapter.ts (1-line change, WI-sized small)
+
+  **Short-term (next refinement cycle):**
+  - Update architecture doc (stale counts + tool name) — doc-only changes, medium
+  - Fix test TypeScript errors (18 errors in 2 test files) — small
+  - Add P-59 self-enforcing test (replace hardcoded list) — small
+  - Add adapter-contract test for getDomainState deprecated/superseded exclusion — small
+  - Fix pretest.js to not block npm test — small
+
+  Estimated: 5-6 work items, all small-medium. `/ideate:refine` with scope "address full audit findings".
+cycle: 20
+content_hash: 26ea246b826badcb53d1111f6bdc58917d197741dca32dff2c8bbe1138d22193
+token_count: 1656
