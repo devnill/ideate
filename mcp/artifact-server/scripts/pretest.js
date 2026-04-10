@@ -3,7 +3,6 @@
 // The outer try/catch intentionally swallows all errors (wrong working directory,
 // missing permissions, .ts file absent, etc.). The guard is advisory-only: infra
 // problems with the migration script should never block the test suite from running.
-// Advisory guard: infra problems with the migration script should never block the test suite.
 
 import { statSync } from "fs";
 
