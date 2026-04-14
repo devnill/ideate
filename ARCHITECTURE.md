@@ -404,9 +404,9 @@ Write tools (5)
 Events tools (1)
   ideate_emit_event               — fire hooks registered for a given event name
 
-Metrics tools (2)
-  ideate_get_metrics              — aggregated metrics from metrics_events table
-  ideate_emit_metric              — record a metrics event (token counts, outcomes, timing)
+Metrics tools (2) — soft-deprecated as of WI-790 (see D-211)
+  ideate_get_metrics              — historical reads from the metrics_events SQLite table; functional for backward-compatible access.
+  ideate_emit_metric              — no-op; emission is disabled but the tool stays registered to avoid breaking existing skill code. New analytics must not depend on metric emission.
 
 Config tools (2)
   ideate_get_config               — Parsed project config with defaults (agent_budgets, model_overrides, ppr). Use for token budget, model selection, and PPR settings. Returns JSON config object.
