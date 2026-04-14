@@ -4,26 +4,48 @@ reviewer: spec-reviewer
 content: |-
   ## Verdict: Pass
 
-  ## Principle Adherence: Pass
-  - P-44: deleteNode two-phase write complete. Phase 0 saves content, Phase 1 unlinks (ENOENT-tolerant), Phase 2 exclusive transaction; catch restores YAML.
-  - P-53: No storage-format references in new contract entries.
-  - P-64: All ValidationError codes conform to recognized patterns.
-  - D-177: LocalAdapter tests unconditional throughout.
-  - P-002: No new validation logic without tests.
+  0 findings. All acceptance criteria met.
 
-  ## Minor Findings
+  ## Architecture Deviations
+  None.
 
-  ### M1: nextId Validation entry lists only 3 types; WI-709 criterion specified more
-  - adapter-contract.md line 313: lists `journal_entry`, `work_item`, `finding`
-  - WI-709 criterion also listed `guiding_principle`, `constraint`, `phase`, `project`
-  - The worker verified from writer.ts that only 3 types are supported for ID generation, so the doc is correct; the criterion was overstated. Verify implementation supports only 3 types to close.
-content_hash: 4673e8cd81b58418b868a6831529518db6999b71baf6a4c67a654435396b47b5
-token_count: 390
+  ## Unmet Acceptance Criteria
+  None.
+
+  ## Principle Violations
+  None.
+
+  ## Principle Adherence Evidence
+  - P-02: All 7 edge_type_weights test cases cover valid and invalid inputs.
+  - P-43: ValidatingAdapter.traverse() has full unit test coverage through mock adapter pattern.
+  - P-44: Not touched by WI-778 (read-only validation path).
+  - P-75: VALID_EDGE_TYPE assigned from ALL_EDGE_TYPES[0], querying the live constant.
+  - Architecture — Single validation layer: ValidatingAdapter wraps raw storage adapter once at server.ts:144. context.ts has zero ValidationError throws for traversal parameters. ppr.ts retains defense-in-depth guards.
+  - Architecture — Field ordering: edge_type_weights validation block placed after max_nodes and before always_include_types, matching WI-778 implementation notes.
+
+  ## Undocumented Additions
+  None.
+
+  ## Naming/Pattern Inconsistencies
+  None.
+content_hash: f3e4d9564a481711c08b1eef110cd43f03fc8bcb990a489aaf605caba085a7ba
+token_count: 689
 file_path: .ideate/cycles/068/spec-adherence.yaml
-cycle: 25
-cycle_modified: 19
 verdict: Pass
-scope: full-audit
-date: "20260407"
-findings: []
-summary: "All four WI-714 acceptance criteria met. P-53 runtime compliance confirmed: zero 'SQLite' in throw statements. Test description strings containing 'SQLite' are internal implementation detail, not public interface — not a P-53 violation. adapter-contract.md deleteNode Error Handling block complete with all four entries."
+architecture_deviations: None. All files touched by PH-017 reside in correct locations per architecture.
+unmet_acceptance_criteria: None. All 9 work items (WI-754 through WI-762) have all acceptance criteria satisfied.
+principle_violations: None.
+principle_adherence_evidence:
+  P-75: Schema test assertions query live DB via columnNames()/tableNames() using PRAGMA table_info and sqlite_master. WI-754 sqlite_* filter at schema.test.ts:110. WI-760 CASCADE test at schema.test.ts:787-801.
+  P-76: WI-759 created to address prior S1 finding. WI-754.yaml criterion 2 now documents sqlite_* filter.
+  P-44: Write-transaction test at write-transaction.test.ts:450-493 verifies two-phase pattern for putNodeForJournal.
+  GP-14: All test improvements operate through createSchema() and test helpers, not bypassing schema layer.
+  C-07: All WI criteria are machine-verifiable code patterns or test outcomes.
+undocumented_additions: None.
+naming_inconsistencies:
+  - id: N1
+    title: WI-757 describe block name differs from spec shorthand
+    description: WI-757 criterion refers to describe('proxy_human_decisions table') but implementation uses describe('createSchema — proxy_human_decisions table') matching the file-wide established pattern. Documentation imprecision in spec, not a code violation.
+residual_note: WI-754.yaml notes section still shows original 3-table filter code example while criteria field correctly documents 4-category filter. Notes are historical context, not prescriptive.
+cycle: 25
+cycle_modified: 23

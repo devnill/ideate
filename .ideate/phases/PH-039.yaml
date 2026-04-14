@@ -1,6 +1,6 @@
 id: PH-039
 type: phase
-status: active
+status: complete
 name: Graph Curation Improvements
 phase_type: implementation
 project: PR-002
@@ -13,5 +13,6 @@ work_items:
   - WI-722
   - WI-723
   - WI-724
-content_hash: c9c2b8e97cb9aaf9ef17697a6d49da595676f5c8d8809f2df54d0de406b86c0b
-token_count: 108
+content_hash: c329c1002a4c8578500346f0962070b26a468804e9efb8cd5cb2f32902b3b161
+token_count: 137
+cycle_modified: 27

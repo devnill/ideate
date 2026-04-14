@@ -1,6 +1,6 @@
 id: PR-002
 type: project
-current_phase_id: PH-038
+current_phase_id: PH-043
 horizon:
   completed:
     - PH-017
@@ -19,15 +19,25 @@ horizon:
     - PH-033
     - PH-034
     - PH-037
-  next:
-    - name: Input Validation Layer
-      description: Comprehensive input validation layer for adapter methods
-    - name: PPR Divergence Investigation
-      description: Deep investigation and resolution of PPR algorithm divergence
-  later: []
+    - PH-039
+    - PH-040
+    - PH-041
+    - PH-042
+    - PH-043
+  next: []
+  later:
+    - id: PH-044-candidate
+      name: RemoteAdapter P1 divergence fixes
+      description: max_nodes semantic alignment (D4), metrics.ts raw SQL (Leak 7), always_include_types case forwarding re-evaluation. Follows PH-043 P0 closure.
+    - id: PH-045-candidate
+      name: RemoteAdapter P2 dead code and convention cleanup
+      description: CONTAINMENT_EDGE_TYPES removal, edge type case normalization, test-only adapter fallback removal. Low-risk cleanup.
+    - id: PH-046-candidate
+      name: StorageAdapter equivalence test gap closure
+      description: "Five equivalence test additions: readNodeContent, archiveCycle, queryGraph, countNodes, traverse structural assertions."
 intent: Refactor and harden the StorageAdapter implementations for production use
 name: Ideate Plugin - Adapter Refactor
 status: active
-content_hash: fb41511b68212be50422aaa61b9d61abe462afa33e424a97d191bdb5a0dcd123
-token_count: 196
-cycle_modified: 19
+content_hash: 62e54993fa946ca49b7dcdd5f707f788ff00733660831a95a49b63509ac287c7
+token_count: 324
+cycle_modified: 27

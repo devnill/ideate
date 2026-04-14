@@ -1,0 +1,12 @@
+id: Q-157
+type: domain_question
+title: Metrics composition feasibility — Node.properties typed numeric columns
+domain: agent-system
+question: Do Node.properties returned by getNodes() contain the typed numeric columns (input_tokens, output_tokens, cache_read_tokens, cache_write_tokens) needed for metrics aggregation? If not, a dedicated queryMetrics() adapter method may be required instead of composition.
+source: cycle-027 OQ-027-07, gap-analyst EC2
+impact: If composition is not feasible, the metrics leak fix (P1) requires a new StorageAdapter method, contradicting P-84.
+status: open
+cycle: 27
+cycle_modified: 25
+content_hash: fa1d8fcdeee7f2d3f19a987f960f3bcca8a2bcf0b85703314982137d25daae54
+token_count: 155

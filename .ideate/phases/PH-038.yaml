@@ -3,7 +3,7 @@ type: phase
 name: Graph Curation Analysis
 description: Three parallel investigation spikes covering graph enrichment, data validity, and multi-.ideate merge design. Output is structured research artifacts only — no implementation.
 phase_type: spike
-status: active
+status: complete
 started_date: 2026-04-08
 work_items:
   - WI-715
@@ -13,6 +13,6 @@ success_criteria:
   - Graph edge coverage gaps identified and ranked by traversal/PPR impact
   - Inventory of invalid, obsolete, and legacy-type nodes documented with remediation complexity
   - Multi-.ideate merge design document produced covering ID conflict taxonomy, reference field map, reindexing algorithm, and known edge cases
-cycle_modified: 19
-content_hash: dc08cdc65d085379ad35fcdab8a7c521df37ac054ff5752eeb45b84e643cf804
-token_count: 174
+cycle_modified: 27
+content_hash: 500aa31ff2da411104e2262c426de92fbb0c9a69067cd1961064cb1752af879e
+token_count: 198

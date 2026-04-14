@@ -1,0 +1,23 @@
+id: interview-refine-028
+type: interview
+cycle: 28
+phase: PH-043
+entries:
+  - domain: project-boundaries
+    question: PR-002 current phase PH-042 is complete and no phases are on the horizon. Is the project complete, mark PR-002 complete (resume PR-001), define a new phase in PR-002 for the RF-clean-interface-proposal implementation work, or define a new phase in PR-001?
+    answer: "What projects are coming up? — clarifying question before deciding. After inventory review, proceeded with option 1: define a new phase in PR-002."
+  - domain: adapter-boundary
+    question: What scope for the first new phase — P0 only (3-4 WIs), or P0+P1 bundled?
+    answer: P0 only. Tighter scope lands critical leaks first; P1+ follow in subsequent phases.
+  - domain: adapter-boundary
+    question: "New bug discovery during refine: ideate_assemble_context returned 226K characters, exceeding MCP tool result limits. Where does this fit?"
+    answer: "Add as additional P0 work item in the new phase. Root cause identified at mcp/artifact-server/src/adapters/local/context.ts:225-291 — always_include_types loop pulls every artifact of type architecture/guiding_principle/constraint regardless of token_budget. This is RF-ppr-divergence-catalog D3 but the original resolution (unconditional inclusion) perpetuates the bug. Redesign: enforce budget for always_include_types too."
+  - domain: adapter-boundary
+    question: Do the existing guiding principles still hold for this refinement?
+    answer: Yes. GP-14 (MCP abstraction boundary) is particularly load-bearing for this phase. All three P0 fixes enforce GP-14 by removing concrete-adapter leaks from tool handlers.
+  - domain: adapter-boundary
+    question: How should scope conflicts between work items be handled given all three touch adapter.ts and related files?
+    answer: Serialize WI-787 after WI-785 via depends. WI-786 (execution.ts) has no file overlap with the others — can run in parallel with WI-785. Worktree isolation required for adapter-layer changes.
+cycle_modified: 27
+content_hash: 5c1ec16b3081a22c3a4ff7f46f2f0fdc7f8e580da08927bf709e4be15883474f
+token_count: 509

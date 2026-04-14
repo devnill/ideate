@@ -1,6 +1,6 @@
 id: overview
 type: overview
-title: "PH-017 Cycle 23: Schema test coverage completion"
+title: "Cycle 23 — PH-041 Completion: Validation Deduplication + Test Coverage"
 change_plan: |-
   Address three minor carry-forward findings from cycle 20 review. No architecture changes, no new technology.
 
@@ -13,10 +13,10 @@ change_plan: |-
   **What is NOT changing**: adapter.ts, reader.ts, any production code, adapter-contract.md (unless null-status question behavior is found to be incorrectly documented).
 
   **New work items**: WI-745, WI-746.
-content_hash: 3ddf711230ab4d546470adf9f23cd44325afa8943375f485e2a2345a8a87faad
-token_count: 1321
-what_is_changing: Four targeted fixes in the MCP artifact server addressing findings from the full audit conducted in cycle 20.
-trigger: Cycle 22 review minor findings (M3) and carry-forward gaps (CF1-CF4)
+content_hash: 3a6dbcece7707ac18835afb76d142ffc404175991c41e4668e42a25d22db4fa3
+token_count: 2748
+what_is_changing: 1. New ValidatingAdapter class (src/validating.ts) implementing StorageAdapter with comprehensive input validation for all 21 interface methods. 2. server.ts wraps adapter construction in ValidatingAdapter. 3. Inline validation removed from LocalAdapter and RemoteAdapter. 4. Existing validation test files updated to test through the wrapper.
+trigger: Phase transition from PH-017 (Documentation & Cleanup). Driven by the goal of ensuring adapter parity as a prerequisite for the YAML-to-database transition.
 changes:
   - id: WI-759
     description: Update WI-754 acceptance criteria to document the sqlite_* filter that was added during implementation but not reflected in the AC text (P-76 violation).
@@ -26,10 +26,10 @@ changes:
     description: Add assertion for projects.current_phase_id column in the createSchema — projects table describe block. The column exists in the DDL but has no test assertion.
   - id: WI-762
     description: Add assertion for phases.completed_date column in the createSchema — phases table describe block. The column exists in the DDL but has no test assertion.
-scope_boundary: Test files and artifact text only. schema.ts, schema.ts DDL, all production source files, and MCP tools are unchanged.
+scope_boundary: Only the validation layer changes. Adapter implementations, tool handlers, schema, indexer, PPR, and all other modules are untouched.
 unchanged: Architecture, guiding principles, constraints, execution strategy shape, all non-MCP-server code.
 expected_impact: "After this cycle: (1) P-75 sub-rule on CASCADE coverage is satisfied for all extension tables; (2) P-75 sub-rule on all-columns-must-be-asserted is satisfied for projects and phases; (3) P-76 compliance restored for WI-754; (4) Q-146 resolved."
-cycle_modified: 21
+cycle_modified: 27
 cycle: 22
 body: |-
   ## What is changing and why
@@ -56,7 +56,7 @@ body: |-
   ## Expected impact
 
   All three test files pass cleanly. schema.test.ts correctly reflects the 16-table schema. write-transaction.test.ts covers the Phase 2 cleanup branch. migrations.test.ts covers error and multi-step scenarios.
-summary: Four significant findings from the cycle 22 capstone review require correction. All changes are confined to the test suite and one work item artifact — no production code changes.
+summary: Introduce a ValidatingAdapter decorator that centralizes all StorageAdapter input validation. This replaces duplicated inline validation currently spread across LocalAdapter (writer.ts) and RemoteAdapter (index.ts), creating a single source of truth for input validation rules.
 scope_in:
   - mcp/artifact-server/src/__tests__/schema.test.ts
   - mcp/artifact-server/src/__tests__/write-transaction.test.ts
@@ -66,10 +66,75 @@ scope_out:
   - Any other test files
   - Skills or agents
 work_items:
-  - "WI-763: Document reserved keywords in schema.ts DDL"
-  - "WI-764: Column-structure tests for 8 untested tables"
-  - "WI-765: Complete partial column-structure tests for 4 tables"
-  - "WI-766: CASCADE tests for 10 untested tables"
-  - "WI-767: Replace ALL_NODE_TYPES.length hardcoded count"
+  - WI-773
+  - WI-774
+  - WI-775
 scope: Complete schema.test.ts test coverage for all 16 extension tables. Add column-structure tests for 8 untested tables, expand 4 partial tests, add CASCADE tests for 10 untested tables, replace hardcoded ALL_NODE_TYPES count, document reserved keywords in DDL.
 not_changing: No production code changes except DDL comments in schema.ts. No architecture changes. No new modules. All changes are test coverage and documentation.
+what_is_not_changing: Architecture remains unchanged. No new dependencies. No interface changes to StorageAdapter. Business-logic validation (DAG cycle detection, scope collision detection) stays in LocalAdapter where it requires graph state. RemoteAdapter GraphQL communication unchanged.
+description: |-
+  Post-review correction cycle addressing cycle 22 capstone review findings. Two significant and four minor issues prevent PH-041 (Input Validation Layer) from being declared complete.
+
+  ## What Is Changing
+
+  1. **Remove context.ts traverse inline validation** — WI-771 removed validation from writer.ts but missed context.ts. All traverse input validation (seed_ids, alpha, token_budget, max_iterations, always_include_types, convergence_threshold, max_nodes) is removed from context.ts. ValidatingAdapter is now the sole validation gate for traverse().
+
+  2. **Reconcile alpha=0 boundary** — ValidatingAdapter accepted alpha=0 but ppr.ts rejects it (alpha=0 means zero seed influence, semantically useless for context assembly). ValidatingAdapter tightened to (0, 1] matching ppr.ts.
+
+  3. **Update test files** — seed-ids-validation.test.ts and always-include-types-validation.test.ts wrap LocalAdapter in ValidatingAdapter. Error code assertions updated (INVALID_ALWAYS_INCLUDE_TYPE → INVALID_NODE_TYPE).
+
+  4. **Add missing test coverage** — batchMutate MISSING_NODE_ID/MISSING_NODE_TYPE and traverse INVALID_SEED_IDS paths get tests.
+
+  5. **Fix P-75 violation** — Remove fixture array length assertion from local-adapter-validation.test.ts.
+
+  ## What Is NOT Changing
+
+  - reader.ts and index.ts inline validation (carry-forward, not blocking PH-041 completion)
+  - ppr.ts algorithm-level guards (defense-in-depth, intentionally retained)
+  - ValidatingAdapter core structure
+  - RemoteAdapter (already clean from WI-772)
+
+  ## Scope Boundary
+
+  This cycle resolves only the findings that block PH-041's phase goal. reader.ts/index.ts cleanup is a carry-forward item for a future phase.
+content: |-
+  # Overview — PH-043 Change Plan
+
+  ## What is changing
+
+  Three P0 bugs in the MCP artifact server adapter layer that make RemoteAdapter effectively non-functional and make `ideate_assemble_context` unusable at workspace scale:
+
+  1. **Leak 1-2 — context.ts LocalContextAdapter cast** (WI-785). tools/context.ts contains `ctx.adapter as unknown as LocalContextAdapter` reaching five query methods that are not on the StorageAdapter interface. Crashes RemoteAdapter.
+  2. **Leak 5-6 — execution.ts raw SQL** (WI-786). tools/execution.ts calls `ctx.db.prepare()` directly with no adapter fallback. The only tool handler without an adapter path. Crashes RemoteAdapter.
+  3. **Budget violation — always_include_types** (WI-787). LocalContextAdapter.traverse always-include loop ignores `token_budget`, pulling every architecture/guiding_principle/constraint artifact into results regardless of size. User-observed 226K character overflow 2026-04-13.
+
+  ## Triggering context
+
+  - PH-042 spike (WI-781, WI-782, WI-783, WI-784) produced RF-abstraction-boundary-audit, RF-ppr-divergence-catalog, RF-equivalence-test-audit, and RF-clean-interface-proposal. The proposal identifies 12 abstraction leaks and 6 PPR divergences across four implementation phases (P0-P3).
+  - User bug report 2026-04-13: `ideate_assemble_context` returned 226,481 characters, exceeding MCP tool result limits. Root-caused to the always_include_types loop in LocalContextAdapter.traverse at local/context.ts:225-291. This bug is not in the original PH-042 catalog — it is additional input to this phase.
+
+  ## Scope boundary
+
+  **In scope (PH-043)**: The three P0 items above.
+
+  **Out of scope**: All P1, P2, P3 items from RF-clean-interface-proposal. They follow in later phases:
+  - P1: max_nodes semantic alignment (D4), metrics.ts raw SQL (Leak 7), always_include_types case forwarding re-evaluation
+  - P2: CONTAINMENT_EDGE_TYPES dead code (D2), edge type case normalization (D1), test-only adapter fallbacks (Leaks 3,4,8-12)
+  - P3: Five equivalence test additions (readNodeContent, archiveCycle, queryGraph, countNodes, traverse structural assertions)
+
+  This scoping is deliberate: RemoteAdapter is non-functional for three critical tool handlers today. P0 restores it. P1-P3 tighten the contract further without unblocking anything new.
+
+  ## Expected impact
+
+  - RemoteAdapter no longer crashes for `ideate_get_context_package`, `ideate_assemble_context`, or `ideate_get_execution_status`.
+  - `ideate_assemble_context` with default arguments returns results under 60000 tokens on the current workspace (down from 226K+ today).
+  - Adapter boundary invariant: no tool handler imports concrete adapter classes; no tool handler accesses ctx.db or ctx.drizzleDb directly.
+  - Three new adapter-integration tests land in tests/adapters/ for the budget and execution-status equivalence paths.
+
+  ## References
+
+  - **Research**: RF-clean-interface-proposal (WI-784), RF-abstraction-boundary-audit (WI-781), RF-ppr-divergence-catalog (WI-782), RF-equivalence-test-audit (WI-783)
+  - **Bug source files**: mcp/artifact-server/src/tools/context.ts (Leak 1-2), mcp/artifact-server/src/tools/execution.ts (Leak 5-6), mcp/artifact-server/src/adapters/local/context.ts (D3 budget bug)
+  - **Guiding principles**: GP-14 (MCP abstraction boundary)
+  - **Policies**: P-83 (adapter boundary), P-84 (composition over new methods)
+  - **Constraints**: C-06 (non-overlapping scope — serialized WI-785 → WI-787 for adapter file overlap)

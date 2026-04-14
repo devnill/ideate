@@ -1,21 +1,31 @@
 id: review-manifest
 type: cycle_summary
 content: |-
-  ## Review Manifest (Cycle 22) — Phase PH-017
+  ## Review Manifest — Cycle 22 (PH-041: Input Validation Layer)
 
-  | # | WI | Title | File Scope | Incremental Verdict | Findings (C/S/M) |
-  |---|-----|-------|------------|---------------------|------------------|
-  | 1 | WI-754 | Fix extensionTables count assertion to query DB rather than assert local array length | mcp/artifact-server/src/__tests__/schema.test.ts | None | — |
-  | 2 | WI-755 | Fix stale CURRENT_SCHEMA_VERSION marker in checkSchemaVersion test description | mcp/artifact-server/src/__tests__/schema.test.ts | None | — |
-  | 3 | WI-756 | Fix Phase 2 failure test: add EACCES error assertion and platform guard | mcp/artifact-server/src/__tests__/write-transaction.test.ts | None | — |
-  | 4 | WI-757 | Add column-structure test block for proxy_human_decisions in schema.test.ts | mcp/artifact-server/src/__tests__/schema.test.ts | None | — |
-  | 5 | WI-758 | Update migrations.test.ts deferral comment to reference WI-758 | mcp/artifact-server/src/__tests__/migrations.test.ts | None | — |
-  | 6 | WI-759 | Update WI-754 acceptance criteria to document sqlite_* filter | .ideate/work-items/WI-754.yaml | None | — |
-  | 7 | WI-760 | Add proxy_human_decisions ON DELETE CASCADE test | mcp/artifact-server/src/__tests__/schema.test.ts | None | — |
-  | 8 | WI-761 | Assert projects.current_phase_id column in schema test | mcp/artifact-server/src/__tests__/schema.test.ts | None | — |
-  | 9 | WI-762 | Assert phases.completed_date column in schema test | mcp/artifact-server/src/__tests__/schema.test.ts | None | — |
-content_hash: 5f998f648e2b3da6ef35daba28b86a950b15b45b37b6006363b597264db81daf
-token_count: 531
+  | WI | Title | Complexity | Status | Incremental Review | Rework |
+  |---|---|---|---|---|---|
+  | WI-768 | ValidatingAdapter decorator class | large | done | Fail → Pass after 7 fixes (S1-S2, M1-M5) | Yes |
+  | WI-769 | ValidatingAdapter test suite | large | done | Fail → Pass after 5 missing tests (S1-S3) | Yes |
+  | WI-770 | Wire ValidatingAdapter into server.ts | small | done | Pass | No |
+  | WI-771 | Remove LocalAdapter inline validation | medium | done | Pass | No |
+  | WI-772 | Remove RemoteAdapter inline validation | medium | done | Pass | No |
+
+  ### Files Created
+  - src/validating.ts — ValidatingAdapter decorator (575 lines)
+  - src/__tests__/validating.test.ts — 102 tests
+
+  ### Files Modified
+  - src/server.ts — import + wrapper
+  - src/adapters/local/writer.ts — removed inline validation
+  - src/adapters/remote/index.ts — removed inline validation
+  - src/__tests__/dormant.test.ts — instanceof check
+  - src/__tests__/adapter-contract.test.ts — ValidatingAdapter wrapper
+  - tests/adapters/adapter-equivalence.test.ts — ValidatingAdapter wrapper
+  - tests/adapters/local-adapter-validation.test.ts — ValidatingAdapter wrapper
+  - tests/adapters/remote-adapter-validation.test.ts — ValidatingAdapter wrapper
+content_hash: 27b044b276bce4f5bebb284dbaa67c3833495ed2c4a3f4ff0915978e26ae156d
+token_count: 477
 file_path: .ideate/cycles/068/review-manifest.yaml
 cycle: 22
 scope: WI-759, WI-760, WI-761, WI-762

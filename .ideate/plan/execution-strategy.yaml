@@ -1,40 +1,84 @@
 id: execution-strategy
 type: execution_strategy
-mode: sequential
-max_parallelism: 3
-worktrees: false
-review_cadence: per-item
+mode: batched_parallel
+max_parallelism: 2
+worktrees: true
+review_cadence: per_item
 work_item_groups:
   - group: 1
     items:
       - WI-745
       - WI-746
     notes: No dependencies between items. Different files. Run in parallel.
-dependency_graph: WI-763 (independent) | WI-767 (independent) | WI-764 → WI-765 → WI-766
+dependency_graph:
+  WI-785: []
+  WI-786: []
+  WI-787:
+    - WI-785
 agent_configuration:
   model: sonnet
   reviewer_model: sonnet
-content_hash: f53dc58df67fd6b434e5ba62420866fce455d05a1f7dd76eaf85e6ac17884b18
-token_count: 452
+content_hash: af7cf83f8ffe6e47936f231e8afe1b5d8d4631b0583a342cfd2b796a9ed8acef
+token_count: 851
 cycle: 23
-parallelism: 1
+parallelism: 2
 worktree: true
 groups:
-  - name: Independent fixes
+  - name: Group 1 — Independent critical fixes
     items:
-      - WI-763
-      - WI-767
-    notes: WI-763 modifies schema.ts, WI-767 modifies adapter-contract.test.ts — no file overlap with each other or the schema.test.ts chain. Can run in parallel if desired.
-  - name: Schema test coverage chain
+      - WI-785
+      - WI-786
+    notes: WI-785 and WI-786 have no file overlap. Run in parallel with git worktree isolation.
+  - name: Group 2 — Budget enforcement (depends on WI-785)
     items:
-      - WI-764
-      - WI-765
-      - WI-766
-    notes: All three modify schema.test.ts. Must be sequential. WI-764 adds new describe blocks, WI-765 expands existing ones, WI-766 adds CASCADE tests.
+      - WI-787
+    notes: WI-787 depends on WI-785 because both modify adapter.ts / local/context.ts / remote/index.ts. Run sequentially after WI-785 merges.
 note_on_wi749: WI-749 is a spike. If it finds domain_index is a planned-but-unimplemented feature, new work items will be created in the next refinement. It does not block any other item.
 note_on_wi750_wi748_overlap: WI-748 modifies writer.ts function bodies. WI-750 modifies only the module header comment at writer.ts:8-10. These are non-overlapping line ranges and can execute in parallel.
-cycle_modified: 21
+cycle_modified: 27
 rationale: WI-760, WI-761, and WI-762 all modify schema.test.ts at different sections. Sequential execution avoids merge conflicts on the same file. WI-759 modifies a work item artifact and could run in parallel with WI-760, but the batch is small enough that sequential ordering is simpler.
 agent_config:
   model: sonnet
   max_turns: 100
+notes: "Expected shape: 2 parallel items then 1 serial item. Worktree isolation required because all three touch the adapter layer and parallel merges into the same adapter files would collide. Parallelism 2 matches Group 1; Group 2 is single-item so parallelism is moot."
+content: |-
+  # Execution Strategy — PH-042 (Spike)
+
+  ## Mode
+  Batched parallel — WI-781, WI-782, WI-783 run concurrently (all read-only investigations with non-overlapping file scope). WI-784 runs after all three complete (depends on their findings).
+
+  ## Parallelism
+  Max parallelism: 3
+  Worktrees: disabled (read-only spike, no file modifications)
+
+  ## Review cadence
+  Incremental review after each work item. Capstone review after WI-784 completes.
+
+  ## Work Item Groups
+
+  ### Group 1 (parallel)
+  - WI-781: Audit StorageAdapter abstraction boundary leaks (small)
+  - WI-782: Catalog PPR algorithm divergences (medium)
+  - WI-783: Run equivalence test suite and catalog divergences (medium)
+
+  ### Group 2 (sequential, after Group 1)
+  - WI-784: Synthesize findings into clean interface proposal (medium)
+
+  ## Dependency Graph
+  WI-781 → WI-784
+  WI-782 → WI-784
+  WI-783 → WI-784
+
+  ## Agent Configuration
+  Default model: sonnet
+  Worker type: ideate:worker
+phase: PH-043
+agent_model: sonnet
+worktree_config:
+  enabled: true
+  base_branch: main
+review_agents:
+  - code-reviewer
+  - spec-reviewer
+  - gap-analyst
+capstone_review: "Run /ideate:review after all three items complete. Focus on adapter boundary integrity: confirm no ctx.db references in tool handlers, no concrete adapter imports above the boundary, and budget-enforcement regression tests pass for both LocalAdapter and RemoteAdapter."

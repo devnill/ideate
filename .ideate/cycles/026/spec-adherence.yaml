@@ -2,23 +2,50 @@ id: spec-adherence
 type: cycle_summary
 reviewer: spec-reviewer
 content: |-
-  ## Spec Adherence Review — Cycle 26
+  ## Verdict: Pass
 
-  **Verdict**: Pass
+  All acceptance criteria for WI-779 and WI-780 are met. No architecture deviations, no principle violations, no naming/pattern inconsistencies.
 
-  ## Minor Findings
+  ## Architecture Deviations
+  None.
 
-  - [M1] `tests/adapters/local-adapter-validation.test.ts:1-16` — header comment does not mention patchNode coverage or WI-692. WI-692 spec notes explicitly said to update the header. All 5 formal ACs are met; this is an unmet spec note, not an AC.
+  ## Unmet Acceptance Criteria
+  None. All 6 criteria for WI-779 and all 6 criteria for WI-780 are satisfied.
 
-  ## Principle Adherence Confirmed
+  ## Principle Violations
+  None.
 
-  - P-002: All IMMUTABLE_FIELD tests in all 3 files assert `.code === 'IMMUTABLE_FIELD'` or `toBeInstanceOf(ImmutableFieldError)` and check code
-  - P-64: No new ValidationError calls introduced this cycle
-  - P-65: WI-692 added no new module-level vi.mock to pre-existing files
-  - D-177: adapter-equivalence.test.ts lines 889,908,927 use plain `it` for LocalAdapter; lines 898,917,936 use `it.skipIf(!remoteAvailable)` for RemoteAdapter
-content_hash: 67c66b9380e984d81239c3de7e6aca2d869eabf8201497682c4c11d50bb129c1
-token_count: 267
+  ## Principle Adherence Evidence
+  - GP-01: ALL_EDGE_TYPES sourced from schema.ts, no duplication
+  - P-75: ALL_EDGE_TYPES[0] used for test fixtures, not hardcoded strings
+  - P-81: Number.isFinite() used in validating.ts:297,330,367 and ppr.ts:110,128
+  - P-82: Integration test file exists at tests/adapters/edge-type-weights-validation.test.ts
+  - C-01: No validation in LocalAdapter for alpha/convergence_threshold/edge_type_weights
+  - C-13: NaN and Infinity paths have dedicated unit tests
+
+  ## Undocumented Additions
+  - U1: Extra tests beyond WI-780 AC (zero value, undefined, mixed keys, non-object) — low risk, extends coverage
+
+  ## Naming/Pattern Inconsistencies
+  None.
+content_hash: 950decb1c7c5d7855d282577fc7f2c1397f37192185781b55d5b34696aa01eda
+token_count: 698
 file_path: .ideate/cycles/068/spec-adherence.yaml
-cycle: 26
-cycle_modified: 19
 verdict: Pass
+architecture_deviations: None. All files touched by PH-017 reside in correct locations per architecture.
+unmet_acceptance_criteria: None. All 9 work items (WI-754 through WI-762) have all acceptance criteria satisfied.
+principle_violations: None.
+principle_adherence_evidence:
+  P-75: Schema test assertions query live DB via columnNames()/tableNames() using PRAGMA table_info and sqlite_master. WI-754 sqlite_* filter at schema.test.ts:110. WI-760 CASCADE test at schema.test.ts:787-801.
+  P-76: WI-759 created to address prior S1 finding. WI-754.yaml criterion 2 now documents sqlite_* filter.
+  P-44: Write-transaction test at write-transaction.test.ts:450-493 verifies two-phase pattern for putNodeForJournal.
+  GP-14: All test improvements operate through createSchema() and test helpers, not bypassing schema layer.
+  C-07: All WI criteria are machine-verifiable code patterns or test outcomes.
+undocumented_additions: None.
+naming_inconsistencies:
+  - id: N1
+    title: WI-757 describe block name differs from spec shorthand
+    description: WI-757 criterion refers to describe('proxy_human_decisions table') but implementation uses describe('createSchema — proxy_human_decisions table') matching the file-wide established pattern. Documentation imprecision in spec, not a code violation.
+residual_note: WI-754.yaml notes section still shows original 3-table filter code example while criteria field correctly documents 4-category filter. Notes are historical context, not prescriptive.
+cycle: 26
+cycle_modified: 25

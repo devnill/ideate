@@ -4,29 +4,82 @@ reviewer: spec-reviewer
 content: |-
   ## Verdict: Fail
 
-  ## Principle Violations
+  1 architecture deviation, 1 principle violation, 6 unmet acceptance criteria, 3 undocumented additions, 1 naming inconsistency.
 
-  ### P-17 Violation: config.json updated only by migration scripts
-  - P-17 states: 'config.json is written once and updated only by migration scripts, never by execute, review, or refine phases.'
-  - The ideate_update_config tool (WI-362) writes config.json via MCP at any time, invoked by the settings skill and available to any caller. P-17.amended is null — no amendment covers this new write path.
-  - This is a direct conflict. P-17 must be amended to carve out the settings skill / ideate_update_config tool, or a new superseding policy is needed.
+  ### Architecture Deviations
 
-  ## Adherence Evidence (Passing)
-  - GP-14 / MCP-only artifact access: All 6 updated skills access config exclusively via ideate_get_config() and ideate_update_config. No direct .ideate/ path references in any skill file.
-  - P-33 (no file paths in responses): tools/config.ts response is { status: 'updated', updated_keys: [...] } — no file paths.
-  - P-34 (tool descriptions under 50 words): ideate_update_config description is 22 words.
-  - P-35 (ARCHITECTURE.md updated): '22 tools in 10 categories' heading; config tools section lists both tools; count matches TOOLS array.
-  - P-11 (model set at spawn time): Settings skill persists to config.json; skills read and apply at spawn time. Agent definition files not modified. Consistent with P-11.
+  #### D1: WI-770 criterion specifies wrapping in selectAdapter(), implementation wraps at call site
 
-  ## Naming/Pattern Inconsistencies
+  - **Expected**: WI-770 criterion states "selectAdapter() wraps the returned LocalAdapter or RemoteAdapter in ValidatingAdapter before returning"
+  - **Actual**: `selectAdapter()` returns an unwrapped raw adapter. ValidatingAdapter is applied at the call site in `initServer()`: `const rawAdapter = selectAdapter(...); const adapter = new ValidatingAdapter(rawAdapter);`
+  - **Evidence**: `server.ts:59-82` (selectAdapter returns raw), `server.ts:142-144` (wrapping at call site)
+  - **Mitigation**: WI-770 implementation notes say "Wrap the result before assigning to state" — the implementation follows the notes. The dormant test at `dormant.test.ts:357` verifies the end state (ValidatingAdapter instanceof check). The criterion wording conflicts with the notes.
+  - **Severity**: Minor — the end state is correct, the criterion text is ambiguous.
 
-  ### N1: name: frontmatter key in settings skill has no precedent
-  - skills/settings/SKILL.md:2 — name: ideate:settings is present. No other SKILL.md file uses this key. The key is inert at runtime but inconsistent.
+  #### D2: Inline validation not fully removed from LocalAdapter (reader.ts, context.ts, index.ts out of WI-771 scope)
 
-  ### N2: WI-361 criterion uses valid_sources/valid_targets but implementation uses source_types/target_types
-  - EdgeTypeSpec defines source_types and target_types. The WI-361 criterion text says valid_sources/valid_targets. Functional intent is delivered but criterion field names do not match the implementation.
-content_hash: 20d3f171f8c0ec34cf28e73e5de60a00e2a3b465a4b61822c0e68d2fb7b01374
-token_count: 921
+  - **Expected**: Phase goal: centralize input validation in ValidatingAdapter.
+  - **Actual**: WI-771 scope was limited to `writer.ts`. Inline input validation remains in: `reader.ts` (INVALID_NODE_ID, INVALID_LIMIT, INVALID_OFFSET, INVALID_CYCLE), `context.ts` (INVALID_SEED_IDS, EMPTY_SEED_IDS, INVALID_SEED_ID, INVALID_ALWAYS_INCLUDE_TYPE, INVALID_ALPHA, INVALID_TOKEN_BUDGET, INVALID_MAX_ITERATIONS), `index.ts` (INVALID_LIMIT, INVALID_OFFSET).
+  - **Evidence**: `reader.ts:279-280`, `context.ts:204-218`, `index.ts:94-98`
+  - **Severity**: Significant — this is a phase-goal gap, not a WI-771 violation per se (WI-771 spec only listed writer.ts). These are now dead code in production since ValidatingAdapter intercepts first.
+
+  ### Unmet Acceptance Criteria
+
+  #### WI-768
+
+  1. **nextId cycle validation**: Criterion says "nextId validates: cycle is provided when type is cycle-scoped." Implementation deliberately does NOT validate this — comment says "cycle validation is type-specific and handled by the inner adapter." Test at validating.test.ts:994 confirms the opposite behavior.
+
+  2. **traverse token_budget**: Criterion says "token_budget (if provided) is positive integer." Implementation allows `token_budget >= 0` (non-negative). Test at validating.test.ts:741 explicitly accepts `token_budget: 0`.
+
+  3. **removeEdges edge_types**: Criterion says "edge_types is non-empty array of valid EdgeType values." Implementation treats empty edge_types as a no-op. Test at validating.test.ts:605 confirms "resolves without error for empty edge_types array (no-op)."
+
+  #### WI-769
+
+  4. **Missing INVALID_SEED_IDS test**: No test for non-array seed_ids input. The INVALID_SEED_IDS code path (validating.ts:269-273) is untested.
+
+  5. **nextId cycle test**: Criterion implies testing that missing cycle for cycle-scoped type throws. No such test exists — test at line 994 confirms the opposite.
+
+  #### WI-770
+
+  6. **selectAdapter wrapping**: Criterion says wrapping in selectAdapter(). Implementation wraps at call site. See D1 above.
+
+  ### Principle Violations
+
+  #### P1: Policy P-75 — fixture array length assertion
+
+  - **Principle**: Test assertions must query the live system, not assert fixture array lengths.
+  - **Violation**: `tests/adapters/local-adapter-validation.test.ts:869` contains `expect(expectedCodes).toHaveLength(19)` — asserting length of a locally-defined array.
+  - **Severity**: Minor — the array is a test-local fixture, not a live system check.
+
+  ### Undocumented Additions
+
+  #### U1: MISSING_NODE_ID and MISSING_NODE_TYPE error codes in batchMutate
+
+  Not in WI-768 error code specification. Added at validating.ts:429-448. Referenced in local-adapter-validation.test.ts:854-855 but untested in validating.test.ts.
+
+  #### U2: INVALID_DOMAIN error code in getDomainState
+
+  Not in WI-768 error code specification. Added at validating.ts:536. Tested in validating.test.ts:1305-1320.
+
+  #### U3: Validation order inconsistency in traverse
+
+  ValidatingAdapter validates alpha before always_include_types. LocalAdapter context.ts validates always_include_types before alpha. Tests in always-include-types-validation.test.ts rely on the inner ordering.
+
+  ### Naming Inconsistency
+
+  #### N1: INVALID_ALWAYS_INCLUDE_TYPE vs INVALID_NODE_TYPE
+
+  ValidatingAdapter uses INVALID_NODE_TYPE for invalid always_include_types values. LocalAdapter context.ts and docs/adapter-contract.md use INVALID_ALWAYS_INCLUDE_TYPE. Since ValidatingAdapter is the canonical layer, the docs and inner adapter are inconsistent with runtime behavior.
+
+  ### Principle Adherence Evidence
+
+  - GP-1 (Spec Sufficiency): Met — WI-768 through WI-772 have explicit, machine-verifiable criteria.
+  - GP-4 (Parallel-First): Met — WI-771/WI-772 touch disjoint files, ran in parallel.
+  - GP-5 (Continuous Review): Met — all 5 items incrementally reviewed.
+  - GP-14 (MCP Abstraction Boundary): Met — no .ideate/ access in ValidatingAdapter code.
+  - P-69 (Remove superseded code): Partially met — writer.ts cleaned up, context.ts/reader.ts not.
+content_hash: c8b37c38dbf0e65cff58931c4f083ab84635a7cd3e91ff665f5dad51bb8cc5b1
+token_count: 1768
 file_path: .ideate/cycles/068/spec-adherence.yaml
 verdict: Pass
 architecture_deviations: None. All files touched by PH-017 reside in correct locations per architecture.

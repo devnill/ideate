@@ -7,17 +7,18 @@ acceptance_criteria:
   - Auth token rotation mechanism documented
   - All significant findings from Cycle 20 addressed
 appetite: 3
-content_hash: f2959d6122c12a5bc8fad2839a2a18ab6675016acbec5e0ab495e1579b6b8717
+content_hash: f9e7dd1be75d5d4c258597a951344c9b0af395fa4979753ad1db3acfc0ca5515
 depends_on:
   - PH-025
 intent: Complete production hardening for MCP artifact-server and deploy ideate-server for end-to-end verification. Address deferred gaps from Cycles 17-20 including TLS documentation, stress testing, and server-side parity verification.
 name: Production Hardening & Server Deployment
 phase_type: hardening
 project: PR-003
-status: completed
-token_count: 190
+status: complete
+token_count: 210
 work_items:
   - WI-631
   - WI-632
   - WI-633
   - WI-634
+cycle_modified: 27

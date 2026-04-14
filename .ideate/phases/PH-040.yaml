@@ -1,5 +1,5 @@
 id: PH-040
-type: implementation
+type: phase
 name: Audit Corrections — Schema & Write Integrity
 project: PR-002
 intent: "Fix critical and significant findings from the cycle 20 full audit: correct CONFIG_SCHEMA_VERSION constant, restructure putNodeForJournal for P-44 compliance, investigate domain_index, and clean up stale documentation in source."
@@ -14,6 +14,7 @@ work_items:
   - WI-749
   - WI-750
 cycle_created: 21
-cycle_modified: 20
-content_hash: ecbc2578388354ba57b4cefd135f7987867f603cdd7abb165174ec1f44518379
-token_count: 206
+cycle_modified: 27
+content_hash: d0eb176805e0c780c3ae04564922eae37e6b8aec018703bacc9ffd7ece406c17
+token_count: 232
+status: complete
