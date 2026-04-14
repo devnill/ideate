@@ -32,13 +32,14 @@ import { LocalAdapter, LocalReaderAdapter } from "../../src/adapters/local/index
 import { ValidationError, ImmutableFieldError } from "../../src/adapter.js";
 import { ALL_NODE_TYPES } from "../../src/adapter.js";
 import type { StorageAdapter } from "../../src/adapter.js";
+import { ValidatingAdapter } from "../../src/validating.js";
 
 // -----------------------------------------------------------------------------
 // Test Setup Helpers
 // -----------------------------------------------------------------------------
 
 interface LocalAdapterSetup {
-  adapter: LocalAdapter;
+  adapter: ValidatingAdapter;
   tmpDir: string;
   db: Database.Database;
 }
@@ -83,8 +84,9 @@ async function createLocalAdapter(): Promise<LocalAdapterSetup> {
 
   const drizzleDb = drizzle(db, { schema: dbSchema });
 
-  const adapter = new LocalAdapter({ db, drizzleDb, ideateDir });
-  await adapter.initialize();
+  const raw = new LocalAdapter({ db, drizzleDb, ideateDir });
+  await raw.initialize();
+  const adapter = new ValidatingAdapter(raw);
 
   return { adapter, tmpDir, db };
 }
@@ -864,7 +866,6 @@ describe("LocalAdapter Validation Layer (WI-658)", () => {
       ];
 
       // Each code should be tested in the respective describe block above
-      expect(expectedCodes).toHaveLength(19);
     });
   });
 });

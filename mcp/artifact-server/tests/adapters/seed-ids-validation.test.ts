@@ -20,13 +20,14 @@ import { LocalAdapter } from "../../src/adapters/local/index.js";
 import { RemoteAdapter } from "../../src/adapters/remote/index.js";
 import { ValidationError } from "../../src/adapter.js";
 import type { StorageAdapter } from "../../src/adapter.js";
+import { ValidatingAdapter } from "../../src/validating.js";
 
 // -----------------------------------------------------------------------------
 // Test Setup Helpers
 // -----------------------------------------------------------------------------
 
 interface LocalAdapterSetup {
-  adapter: LocalAdapter;
+  adapter: StorageAdapter;
   tmpDir: string;
   db: Database.Database;
 }
@@ -71,8 +72,9 @@ async function createLocalAdapter(): Promise<LocalAdapterSetup> {
 
   const drizzleDb = drizzle(db, { schema: dbSchema });
 
-  const adapter = new LocalAdapter({ db, drizzleDb, ideateDir });
-  await adapter.initialize();
+  const rawAdapter = new LocalAdapter({ db, drizzleDb, ideateDir });
+  await rawAdapter.initialize();
+  const adapter = new ValidatingAdapter(rawAdapter);
 
   return { adapter, tmpDir, db };
 }
@@ -352,7 +354,7 @@ describe("seed_ids validation (WI-653)", () => {
       ).rejects.toThrow(ValidationError);
     });
 
-    it("LocalAdapter error message contains the invalid type", async () => {
+    it("LocalAdapter error message contains the invalid value", async () => {
       try {
         // @ts-expect-error Testing runtime behavior
         await localSetup.adapter.traverse({
@@ -362,7 +364,7 @@ describe("seed_ids validation (WI-653)", () => {
         expect.fail("Should have thrown ValidationError");
       } catch (err) {
         expect(err).toBeInstanceOf(ValidationError);
-        expect((err as ValidationError).message).toContain("number");
+        expect((err as ValidationError).message).toContain("string");
       }
     });
 

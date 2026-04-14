@@ -20,6 +20,7 @@ import path from "path";
 import { createSchema } from "../schema.js";
 import * as dbSchema from "../db.js";
 import { LocalAdapter } from "../adapters/local/index.js";
+import { ValidatingAdapter } from "../validating.js";
 import type {
   StorageAdapter,
   MutateNodeInput,
@@ -715,6 +716,60 @@ export function runAdapterContractTests(
         }
       });
 
+      itTraverse(
+        "traverse enforces token_budget on always_include_types (WI-787 AC-5)",
+        async () => {
+          // Seed node — also serves as the traverse seed_id.
+          await adapter.putNode({
+            id: "GP-SEED-TR",
+            type: "guiding_principle",
+            properties: {
+              name: "Seed",
+              description: "seed",
+            },
+          });
+
+          // Seed many oversized guiding_principles and constraints so that
+          // unconditionally including all of them would exceed a 1000-token
+          // budget by a wide margin.
+          for (let i = 1; i <= 30; i++) {
+            const pad = String(i).padStart(3, "0");
+            const description = "x".repeat(2 * 1024); // ~512 tokens each
+            await adapter.putNode({
+              id: `GP-BG-${pad}`,
+              type: "guiding_principle",
+              properties: { name: `GP ${pad}`, description },
+            });
+            await adapter.putNode({
+              id: `C-BG-${pad}`,
+              type: "constraint",
+              properties: { category: "data", description },
+            });
+          }
+
+          const result = await adapter.traverse({
+            seed_ids: ["GP-SEED-TR"],
+            token_budget: 1000,
+            always_include_types: ["guiding_principle", "constraint"],
+          });
+
+          // Without budget enforcement, total_tokens would easily exceed
+          // 1000 (30 GPs * ~512 tokens + 30 constraints * ~512 tokens = ~30k).
+          // Seeds are force-included, so the seed's tokens may push the
+          // total above budget slightly; non-seed tokens must stay within.
+          const seedTokens = result.ranked_nodes
+            .filter((rn) => rn.node.id === "GP-SEED-TR")
+            .reduce((sum, rn) => sum + (rn.node.token_count ?? 0), 0);
+          const nonSeedTokens = result.total_tokens - seedTokens;
+          expect(nonSeedTokens).toBeLessThanOrEqual(1000);
+
+          // Overflow must be signaled so callers can detect incomplete context.
+          expect(result.budget_exhausted).toBe(true);
+          expect(Array.isArray(result.truncated_types)).toBe(true);
+          expect((result.truncated_types ?? []).length).toBeGreaterThan(0);
+        }
+      );
+
       itTraverse("traverse rejects negative token_budget with ValidationError", async () => {
         await adapter.putNode({
           id: "WI-TR02",
@@ -1335,6 +1390,243 @@ export function runAdapterContractTests(
         expect(node!.type).toBe("journal_entry");
       });
     });
+
+    // -----------------------------------------------------------------------
+    // Context assembly: five code paths (WI-785)
+    //
+    // These tests verify that the five query patterns used by handleGetContextPackage
+    // work correctly through the StorageAdapter contract. Previously these went
+    // through a LocalContextAdapter cast; now they compose queryNodes + getNodes
+    // (+ readNodeContent for architecture). Both LocalAdapter and RemoteAdapter
+    // must satisfy this contract.
+    // -----------------------------------------------------------------------
+
+    describe("Context assembly queries", () => {
+      // -----------------------------------------------------------------------
+      // 1. Architecture document
+      // -----------------------------------------------------------------------
+
+      describe("queryNodes({type:'architecture'}) + getNodes + readNodeContent", () => {
+        it("returns empty result when no architecture node exists", async () => {
+          const result = await adapter.queryNodes({ type: "architecture" }, 1, 0);
+          expect(result.nodes).toHaveLength(0);
+          expect(result.total_count).toBe(0);
+        });
+
+        it("returns the architecture node with content in properties", async () => {
+          await adapter.putNode({
+            id: "arch-001",
+            type: "architecture",
+            properties: {
+              title: "Test Architecture",
+              content: "## Overview\nSystem description here.",
+            },
+          });
+
+          const queryResult = await adapter.queryNodes({ type: "architecture" }, 1, 0);
+          expect(queryResult.nodes).toHaveLength(1);
+          expect(queryResult.nodes[0].node.id).toBe("arch-001");
+
+          const nodesMap = await adapter.getNodes(["arch-001"]);
+          const archNode = nodesMap.get("arch-001");
+          expect(archNode).toBeDefined();
+          expect(typeof archNode!.properties.content).toBe("string");
+          expect(archNode!.properties.content).toContain("## Overview");
+          expect(archNode!.properties.title).toBe("Test Architecture");
+        });
+
+        it("readNodeContent returns non-empty string for an architecture node", async () => {
+          await adapter.putNode({
+            id: "arch-002",
+            type: "architecture",
+            properties: { title: "Arch", content: "Some arch content." },
+          });
+
+          // readNodeContent is available on the raw adapter contract
+          const content = await adapter.readNodeContent("arch-002");
+          // May be empty for RemoteAdapter (it stores differently), but must not throw
+          expect(typeof content).toBe("string");
+        });
+      });
+
+      // -----------------------------------------------------------------------
+      // 2. Guiding Principles
+      // -----------------------------------------------------------------------
+
+      describe("queryNodes({type:'guiding_principle'}) + getNodes", () => {
+        it("returns empty result when no guiding principles exist", async () => {
+          const result = await adapter.queryNodes({ type: "guiding_principle" }, 1000, 0);
+          expect(result.nodes).toHaveLength(0);
+        });
+
+        it("returns guiding principles with name and description in properties", async () => {
+          await adapter.putNode({
+            id: "GP-01",
+            type: "guiding_principle",
+            properties: { name: "Test Principle", description: "Do the right thing." },
+          });
+          await adapter.putNode({
+            id: "GP-02",
+            type: "guiding_principle",
+            properties: { name: "Another Principle", description: "Be consistent." },
+          });
+
+          const queryResult = await adapter.queryNodes({ type: "guiding_principle" }, 1000, 0);
+          expect(queryResult.nodes.length).toBeGreaterThanOrEqual(2);
+
+          const ids = queryResult.nodes.map((n) => n.node.id);
+          const nodesMap = await adapter.getNodes(ids);
+
+          const gp01 = nodesMap.get("GP-01");
+          expect(gp01).toBeDefined();
+          expect(gp01!.properties.name).toBe("Test Principle");
+          expect(gp01!.properties.description).toBe("Do the right thing.");
+
+          const gp02 = nodesMap.get("GP-02");
+          expect(gp02).toBeDefined();
+          expect(gp02!.properties.name).toBe("Another Principle");
+        });
+
+        it("preserves id-order sorting (GP-01 before GP-02)", async () => {
+          await adapter.putNode({
+            id: "GP-01",
+            type: "guiding_principle",
+            properties: { name: "First", description: "First principle." },
+          });
+          await adapter.putNode({
+            id: "GP-02",
+            type: "guiding_principle",
+            properties: { name: "Second", description: "Second principle." },
+          });
+
+          const result = await adapter.queryNodes({ type: "guiding_principle" }, 1000, 0);
+          const ids = result.nodes.map((n) => n.node.id);
+          const idx01 = ids.indexOf("GP-01");
+          const idx02 = ids.indexOf("GP-02");
+          expect(idx01).toBeGreaterThanOrEqual(0);
+          expect(idx02).toBeGreaterThanOrEqual(0);
+          expect(idx01).toBeLessThan(idx02);
+        });
+      });
+
+      // -----------------------------------------------------------------------
+      // 3. Constraints
+      // -----------------------------------------------------------------------
+
+      describe("queryNodes({type:'constraint'}) + getNodes", () => {
+        it("returns empty result when no constraints exist", async () => {
+          const result = await adapter.queryNodes({ type: "constraint" }, 1000, 0);
+          expect(result.nodes).toHaveLength(0);
+        });
+
+        it("returns constraints with category and description in properties", async () => {
+          await adapter.putNode({
+            id: "C-01",
+            type: "constraint",
+            properties: { category: "technology", description: "Use TypeScript." },
+          });
+          await adapter.putNode({
+            id: "C-02",
+            type: "constraint",
+            properties: { category: "security", description: "No plaintext secrets." },
+          });
+
+          const queryResult = await adapter.queryNodes({ type: "constraint" }, 1000, 0);
+          expect(queryResult.nodes.length).toBeGreaterThanOrEqual(2);
+
+          const ids = queryResult.nodes.map((n) => n.node.id);
+          const nodesMap = await adapter.getNodes(ids);
+
+          const c01 = nodesMap.get("C-01");
+          expect(c01).toBeDefined();
+          expect(c01!.properties.category).toBe("technology");
+          expect(c01!.properties.description).toBe("Use TypeScript.");
+
+          const c02 = nodesMap.get("C-02");
+          expect(c02).toBeDefined();
+          expect(c02!.properties.category).toBe("security");
+        });
+      });
+
+      // -----------------------------------------------------------------------
+      // 4. Active Project
+      // -----------------------------------------------------------------------
+
+      describe("queryNodes({type:'project', status:'active'}) + getNodes", () => {
+        it("returns empty result when no active project exists", async () => {
+          await adapter.putNode({
+            id: "PR-001",
+            type: "project",
+            properties: { intent: "Build something great.", status: "archived" },
+          });
+          // Patch to archived status
+          await adapter.patchNode({ id: "PR-001", properties: { status: "archived" } });
+
+          const result = await adapter.queryNodes({ type: "project", status: "active" }, 1, 0);
+          expect(result.nodes).toHaveLength(0);
+        });
+
+        it("returns active project with intent and related fields in properties", async () => {
+          await adapter.putNode({
+            id: "PR-001",
+            type: "project",
+            properties: {
+              intent: "Build a great system.",
+              success_criteria: '["criterion 1", "criterion 2"]',
+              appetite: 3,
+              horizon: '{"start": "2026-01"}',
+              status: "active",
+            },
+          });
+          await adapter.patchNode({ id: "PR-001", properties: { status: "active" } });
+
+          const result = await adapter.queryNodes({ type: "project", status: "active" }, 1, 0);
+          expect(result.nodes.length).toBeGreaterThanOrEqual(1);
+
+          const nodesMap = await adapter.getNodes([result.nodes[0].node.id]);
+          const proj = nodesMap.get("PR-001");
+          expect(proj).toBeDefined();
+          expect(proj!.properties.intent).toBe("Build a great system.");
+        });
+      });
+
+      // -----------------------------------------------------------------------
+      // 5. Active Phase
+      // -----------------------------------------------------------------------
+
+      describe("queryNodes({type:'phase', status:'active'}) + getNodes", () => {
+        it("returns empty result when no active phase exists", async () => {
+          const result = await adapter.queryNodes({ type: "phase", status: "active" }, 1, 0);
+          expect(result.nodes).toHaveLength(0);
+        });
+
+        it("returns active phase with phase_type, intent, steering in properties", async () => {
+          await adapter.putNode({
+            id: "PH-001",
+            type: "phase",
+            properties: {
+              project: "PR-001",
+              phase_type: "execution",
+              intent: "Execute the plan.",
+              steering: "Focus on quality.",
+              work_items: '["WI-001", "WI-002"]',
+              status: "active",
+            },
+          });
+          await adapter.patchNode({ id: "PH-001", properties: { status: "active" } });
+
+          const result = await adapter.queryNodes({ type: "phase", status: "active" }, 1, 0);
+          expect(result.nodes.length).toBeGreaterThanOrEqual(1);
+
+          const nodesMap = await adapter.getNodes([result.nodes[0].node.id]);
+          const phase = nodesMap.get("PH-001");
+          expect(phase).toBeDefined();
+          expect(phase!.properties.phase_type).toBe("execution");
+          expect(phase!.properties.intent).toBe("Execute the plan.");
+          expect(phase!.properties.steering).toBe("Focus on quality.");
+        });
+      });
+    });
   });
 }
 
@@ -1398,7 +1690,8 @@ describe("LocalAdapter", () => {
 
       const drizzleDb = drizzle(db, { schema: dbSchema });
 
-      const adapter = new LocalAdapter({ db, drizzleDb, ideateDir });
+      const raw = new LocalAdapter({ db, drizzleDb, ideateDir });
+      const adapter = new ValidatingAdapter(raw);
       return adapter;
     },
     async (_adapter: StorageAdapter): Promise<void> => {

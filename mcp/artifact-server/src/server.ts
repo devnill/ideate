@@ -18,6 +18,7 @@ import type { ToolContext } from "./types.js";
 import type { StorageAdapter } from "./adapter.js";
 import { LocalAdapter } from "./adapters/local/index.js";
 import { RemoteAdapter } from "./adapters/remote/index.js";
+import { ValidatingAdapter } from "./validating.js";
 import { signalIndexReady } from "./tools/index.js";
 import { artifactWatcher, BatchChangeEvent } from "./watcher.js";
 import { createIdeateDir, CONFIG_SCHEMA_VERSION, IDEATE_SUBDIRS, IdeateConfigJson, resolveArtifactDir, readIdeateConfig, readRawConfig } from "./config.js";
@@ -138,8 +139,9 @@ export function initServer(dir: string, state: ServerState): void {
     throw err;
   }
 
-  // Select adapter based on config.backend. Throws if backend is unsupported.
-  const adapter = selectAdapter(dir, newDb, newDrizzle);
+  // Select adapter based on config.backend, then wrap in validation layer.
+  const rawAdapter = selectAdapter(dir, newDb, newDrizzle);
+  const adapter = new ValidatingAdapter(rawAdapter);
 
   // Commit state
   state.ideateDir = dir;

@@ -30,7 +30,7 @@ import type {
   AdapterConfig,
 } from "../../adapter.js";
 
-import { ConnectionError, ValidationError, StorageAdapterError, ImmutableFieldError, ALL_NODE_TYPES, ALL_EDGE_TYPES } from "../../adapter.js";
+import { ConnectionError, ValidationError, StorageAdapterError } from "../../adapter.js";
 import { GraphQLClient } from "./client.js";
 import { log } from "../../logger.js";
 
@@ -503,13 +503,6 @@ export class RemoteAdapter implements StorageAdapter {
   // -------------------------------------------------------------------------
 
   async getNode(id: string): Promise<Node | null> {
-    if (!id || typeof id !== "string") {
-      throw new ValidationError(
-        "Node ID must be a non-empty string",
-        "INVALID_NODE_ID",
-        { value: id }
-      );
-    }
     const data = await this.client.query<{
       artifact: GqlArtifactNode | null;
     }>(
@@ -575,17 +568,6 @@ export class RemoteAdapter implements StorageAdapter {
   }
 
   async putNode(input: MutateNodeInput): Promise<MutateNodeResult> {
-    // Input validation
-    if (typeof input.id !== 'string' || input.id.trim() === '') {
-      throw new ValidationError('Node id must be a non-empty string', 'INVALID_NODE_ID', { value: input.id });
-    }
-    if (!ALL_NODE_TYPES.includes(input.type as NodeType)) {
-      throw new ValidationError(`Invalid NodeType: ${input.type}`, 'INVALID_NODE_TYPE', { value: input.type });
-    }
-    if (input.properties == null) {
-      throw new ValidationError('Node properties must be provided', 'MISSING_NODE_PROPERTIES', {});
-    }
-
     let data: { putNode: { id: string; status: string } };
     try {
       // Fetch current cycle and include cycle_modified in properties (matches LocalAdapter behavior)
@@ -632,19 +614,6 @@ export class RemoteAdapter implements StorageAdapter {
   }
 
   async patchNode(input: UpdateNodeInput): Promise<UpdateNodeResult> {
-    // Input validation
-    if (typeof input.id !== 'string' || input.id.trim() === '') {
-      throw new ValidationError('Node id must be a non-empty string', 'INVALID_NODE_ID', { value: input.id });
-    }
-
-    // Reject immutable fields
-    const IMMUTABLE = ["id", "type", "cycle_created"];
-    for (const field of IMMUTABLE) {
-      if (field in input.properties) {
-        throw new ImmutableFieldError(field);
-      }
-    }
-
     let data: { patchNode: { id: string; status: string } };
     try {
       // Fetch current cycle and include cycle_modified in properties (matches LocalAdapter behavior)
@@ -688,9 +657,6 @@ export class RemoteAdapter implements StorageAdapter {
   }
 
   async deleteNode(id: string): Promise<DeleteNodeResult> {
-    if (typeof id !== 'string' || id.trim() === '') {
-      throw new ValidationError('Node id must be a non-empty string', 'INVALID_NODE_ID', { value: id });
-    }
     let data: { deleteNode: { id: string; status: string } };
     try {
       data = await this.client.mutate<{
@@ -727,18 +693,6 @@ export class RemoteAdapter implements StorageAdapter {
   // -------------------------------------------------------------------------
 
   async putEdge(edge: Edge): Promise<void> {
-    if (!edge.source_id || edge.source_id.trim() === '') {
-      throw new ValidationError('Edge source_id required', 'MISSING_EDGE_SOURCE', {});
-    }
-    if (!edge.target_id || edge.target_id.trim() === '') {
-      throw new ValidationError('Edge target_id required', 'MISSING_EDGE_TARGET', {});
-    }
-    if (!edge.edge_type) {
-      throw new ValidationError('Edge type required', 'MISSING_EDGE_TYPE', {});
-    }
-    if (!ALL_EDGE_TYPES.includes(edge.edge_type as EdgeType)) {
-      throw new ValidationError(`Invalid EdgeType: ${edge.edge_type}`, 'INVALID_EDGE_TYPE', { value: edge.edge_type });
-    }
     try {
       await this.client.mutate<{ putEdge: boolean }>(
         `mutation PutEdge($input: EdgeInput!) {
@@ -770,14 +724,6 @@ export class RemoteAdapter implements StorageAdapter {
     source_id: string,
     edge_types: EdgeType[]
   ): Promise<void> {
-    if (typeof source_id !== 'string' || source_id.trim() === '') {
-      throw new ValidationError('Node id must be a non-empty string', 'INVALID_NODE_ID', { value: source_id });
-    }
-    for (const et of edge_types) {
-      if (!ALL_EDGE_TYPES.includes(et)) {
-        throw new ValidationError(`Invalid EdgeType: ${et}`, 'INVALID_EDGE_TYPE', { value: et });
-      }
-    }
     if (edge_types.length === 0) return;
     try {
       await this.client.mutate<{ removeEdges: boolean }>(
@@ -843,91 +789,6 @@ export class RemoteAdapter implements StorageAdapter {
 
   // AC-6: traverse mapped to assembleContext query with PPR delegation to server
   async traverse(options: TraversalOptions): Promise<TraversalResult> {
-    // Validate seed_ids (WI-653)
-    if (!Array.isArray(options.seed_ids)) {
-      throw new ValidationError(
-        "seed_ids must be an array",
-        "INVALID_SEED_IDS",
-        { value: options.seed_ids }
-      );
-    }
-    if (options.seed_ids.length === 0) {
-      throw new ValidationError(
-        "seed_ids cannot be empty",
-        "EMPTY_SEED_IDS",
-        {}
-      );
-    }
-    for (const id of options.seed_ids) {
-      if (typeof id !== "string") {
-        throw new ValidationError(
-          `Each seed_id must be a string, received ${typeof id}`,
-          "INVALID_SEED_ID",
-          { value: id }
-        );
-      }
-    }
-
-    // Validate PPR parameters (WI-663)
-    // token_budget: must be non-negative
-    if (options.token_budget !== undefined && options.token_budget < 0) {
-      throw new ValidationError(
-        `token_budget must be non-negative (valid range: 0 to Infinity), received ${options.token_budget}`,
-        "INVALID_TOKEN_BUDGET",
-        { value: options.token_budget, validRange: "0 to Infinity" }
-      );
-    }
-
-    // alpha: must be in (0, 1] — strictly positive and at most 1
-    if (options.alpha !== undefined && (options.alpha <= 0 || options.alpha > 1)) {
-      throw new ValidationError(
-        `alpha must be a positive number in (0, 1] (valid range: (0, 1]), received ${options.alpha}`,
-        "INVALID_ALPHA",
-        { value: options.alpha, validRange: "(0, 1]" }
-      );
-    }
-
-    // max_iterations: must be a positive integer (> 0)
-    if (options.max_iterations !== undefined && (!Number.isInteger(options.max_iterations) || options.max_iterations <= 0)) {
-      throw new ValidationError(
-        `max_iterations must be a positive integer (valid range: > 0), received ${options.max_iterations}`,
-        "INVALID_MAX_ITERATIONS",
-        { value: options.max_iterations, validRange: "> 0" }
-      );
-    }
-
-    // convergence_threshold: must be positive number
-    if (options.convergence_threshold !== undefined && options.convergence_threshold <= 0) {
-      throw new ValidationError(
-        `convergence_threshold must be a positive number (valid range: > 0), received ${options.convergence_threshold}`,
-        "INVALID_CONVERGENCE_THRESHOLD",
-        { value: options.convergence_threshold, validRange: "> 0" }
-      );
-    }
-
-    // max_nodes: must be non-negative integer
-    if (options.max_nodes !== undefined && (!Number.isInteger(options.max_nodes) || options.max_nodes < 0)) {
-      throw new ValidationError(
-        `max_nodes must be a non-negative integer (valid range: 0 to Infinity), received ${options.max_nodes}`,
-        "INVALID_MAX_NODES",
-        { value: options.max_nodes, validRange: "0 to Infinity" }
-      );
-    }
-
-    // Validate always_include_types: each value must be a valid NodeType
-    if (options.always_include_types !== undefined) {
-      const validNodeTypes = new Set<string>(ALL_NODE_TYPES);
-      for (const type of options.always_include_types) {
-        if (!validNodeTypes.has(type)) {
-          throw new ValidationError(
-            `Invalid NodeType in always_include_types: ${type}`,
-            "INVALID_ALWAYS_INCLUDE_TYPE",
-            { value: type }
-          );
-        }
-      }
-    }
-
     const input: Record<string, unknown> = {
       seedIds: options.seed_ids,
     };
@@ -989,12 +850,21 @@ export class RemoteAdapter implements StorageAdapter {
       rankedNodes = rankedNodes.slice(0, options.max_nodes);
     }
 
-    // Apply token_budget enforcement client-side (WI-639)
+    // Apply token_budget enforcement client-side (WI-639, WI-787)
     // Matches LocalAdapter behavior in context.ts:
     //   - Seeds are always included (even if they exceed budget)
-    //   - Non-seed ranked nodes are included greedily by score until budget exhausted
-    //   - token_budget=0 means zero budget (only seeds and always_include_types)
+    //   - Non-seed ranked nodes (including always_include_types) are
+    //     budget-gated: dropped when they would bust the budget
+    //   - token_budget=0 means zero budget (only seeds are force-included)
+    //   - truncated_types records NodeTypes dropped from always_include_types
+    //     so callers can detect incomplete context (WI-787)
     let totalTokens = data.assembleContext.totalTokens;
+    let budgetExhausted = false;
+    const truncatedTypeSet = new Set<NodeType>();
+    const alwaysIncludeTypeSet = new Set<NodeType>(
+      options.always_include_types ?? []
+    );
+
     if (options.token_budget !== undefined && options.token_budget >= 0) {
       const budget = options.token_budget;
       const seedSet = new Set(options.seed_ids);
@@ -1014,8 +884,13 @@ export class RemoteAdapter implements StorageAdapter {
           accumulatedTokens += nodeTokens;
           withinBudget.push(rn);
         } else {
-          // Budget exhausted for non-seeds - skip remaining nodes
-          // (continue to check if smaller nodes later can fit, matching LocalAdapter)
+          // Budget exhausted for non-seeds - skip. Track which always-include
+          // types were truncated so callers can signal incomplete context.
+          budgetExhausted = true;
+          const nodeType = rn.node.type as NodeType;
+          if (alwaysIncludeTypeSet.has(nodeType)) {
+            truncatedTypeSet.add(nodeType);
+          }
           continue;
         }
       }
@@ -1024,11 +899,16 @@ export class RemoteAdapter implements StorageAdapter {
       totalTokens = accumulatedTokens;
     }
 
-    return {
+    const result: TraversalResult = {
       ranked_nodes: rankedNodes,
       total_tokens: totalTokens,
       ppr_scores: data.assembleContext.pprScores,
     };
+    if (budgetExhausted) result.budget_exhausted = true;
+    if (truncatedTypeSet.size > 0) {
+      result.truncated_types = Array.from(truncatedTypeSet);
+    }
+    return result;
   }
 
   async queryGraph(
@@ -1036,13 +916,6 @@ export class RemoteAdapter implements StorageAdapter {
     limit: number,
     offset: number
   ): Promise<QueryResult> {
-    if (!Number.isInteger(limit) || limit < 0) {
-      throw new ValidationError("Limit must be a non-negative integer", "INVALID_LIMIT", { limit });
-    }
-    if (!Number.isInteger(offset) || offset < 0) {
-      throw new ValidationError("Offset must be a non-negative integer", "INVALID_OFFSET", { offset });
-    }
-
     const gqlQuery: Record<string, unknown> = {
       originId: query.origin_id,
     };
@@ -1118,13 +991,6 @@ export class RemoteAdapter implements StorageAdapter {
     limit: number,
     offset: number
   ): Promise<QueryResult> {
-    if (!Number.isInteger(limit) || limit < 0) {
-      throw new ValidationError("Limit must be a non-negative integer", "INVALID_LIMIT", { limit });
-    }
-    if (!Number.isInteger(offset) || offset < 0) {
-      throw new ValidationError("Offset must be a non-negative integer", "INVALID_OFFSET", { offset });
-    }
-
     const data = await this.client.query<{
       artifactQuery: {
         edges: Array<{
@@ -1164,24 +1030,6 @@ export class RemoteAdapter implements StorageAdapter {
   }
 
   async nextId(type: NodeType, cycle?: number): Promise<string> {
-    // Validate cycle parameter: must be non-negative integer if provided
-    if (cycle !== undefined) {
-      if (!Number.isInteger(cycle)) {
-        throw new ValidationError(
-          `Cycle must be an integer, received ${typeof cycle}`,
-          "INVALID_CYCLE",
-          { value: cycle }
-        );
-      }
-      if (cycle < 0) {
-        throw new ValidationError(
-          `Cycle must be a non-negative integer, received ${cycle}`,
-          "INVALID_CYCLE",
-          { value: cycle }
-        );
-      }
-    }
-
     const data = await this.client.query<{ nextId: string }>(
       `query NextId($type: NodeType!, $cycle: Int) {
         nextId(type: $type, cycle: $cycle)
@@ -1200,91 +1048,6 @@ export class RemoteAdapter implements StorageAdapter {
   // -------------------------------------------------------------------------
 
   async batchMutate(input: BatchMutateInput): Promise<BatchMutateResult> {
-    const { nodes, edges: extraEdges = [] } = input;
-
-    // ---------- Input validation ----------
-    if (!nodes || nodes.length === 0) {
-      throw new ValidationError(
-        "Batch mutation requires at least one node",
-        "EMPTY_BATCH",
-        {}
-      );
-    }
-
-    const validNodeTypes = new Set<string>(ALL_NODE_TYPES);
-
-    for (const node of nodes) {
-      // Validate node has an id property (can be null/undefined for auto-generation)
-      if (!("id" in node)) {
-        throw new ValidationError(
-          "Node is missing required 'id' field",
-          "MISSING_NODE_ID",
-          { node }
-        );
-      }
-
-      if (node.type === undefined || node.type === null) {
-        throw new ValidationError(
-          "Node is missing required 'type' field",
-          "MISSING_NODE_TYPE",
-          { id: node.id }
-        );
-      }
-
-      if (!node.properties || typeof node.properties !== "object") {
-        throw new ValidationError(
-          "Node is missing required 'properties' field",
-          "MISSING_NODE_PROPERTIES",
-          { id: node.id }
-        );
-      }
-
-      if (!validNodeTypes.has(node.type)) {
-        throw new ValidationError(
-          `Invalid node type: "${node.type}"`,
-          "INVALID_NODE_TYPE",
-          { id: node.id, type: node.type }
-        );
-      }
-    }
-
-    // Valid edge types for validation
-    const validEdgeTypes = new Set<string>(ALL_EDGE_TYPES);
-
-    for (const edge of extraEdges) {
-      if (!edge.source_id) {
-        throw new ValidationError(
-          "Edge is missing required 'source_id' field",
-          "MISSING_EDGE_SOURCE",
-          { edge }
-        );
-      }
-
-      if (!edge.target_id) {
-        throw new ValidationError(
-          "Edge is missing required 'target_id' field",
-          "MISSING_EDGE_TARGET",
-          { edge }
-        );
-      }
-
-      if (!edge.edge_type) {
-        throw new ValidationError(
-          "Edge is missing required 'edge_type' field",
-          "MISSING_EDGE_TYPE",
-          { edge }
-        );
-      }
-
-      if (!validEdgeTypes.has(edge.edge_type)) {
-        throw new ValidationError(
-          `Invalid edge type: "${edge.edge_type}"`,
-          "INVALID_EDGE_TYPE",
-          { edge }
-        );
-      }
-    }
-
     const gqlInput: Record<string, unknown> = {
       nodes: input.nodes.map((n) => ({
         id: n.id,

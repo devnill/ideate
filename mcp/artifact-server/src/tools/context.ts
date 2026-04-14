@@ -3,7 +3,6 @@ import * as path from "path";
 import { parse as parseYaml } from "yaml";
 import type { ToolContext } from "../types.js";
 import { getConfigWithDefaults } from "../config.js";
-import { LocalContextAdapter } from "../adapters/local/index.js";
 
 // ---------------------------------------------------------------------------
 // Module-level caches
@@ -1032,30 +1031,37 @@ export async function handleGetContextPackage(
 
   const sections: string[] = [];
 
-  // Use ctx.adapter query methods when the adapter is set (production path).
-  // Fall back to creating a LocalContextAdapter directly for test compatibility
-  // (tests that build ToolContext without an adapter still work).
-  // Use the adapter's context methods when available. Both LocalAdapter and
-  // LocalContextAdapter expose the same query methods — we need only check
-  // for their presence, not the concrete type.
-  const contextAdapter: LocalContextAdapter =
-    ctx.adapter && "queryArchitectureDocument" in ctx.adapter
-      ? (ctx.adapter as unknown as LocalContextAdapter)
-      : new LocalContextAdapter(ctx.drizzleDb, ctx.db);
+  // Require ctx.adapter — all entry points (server.ts, updated tests) provide one.
+  if (!ctx.adapter) {
+    throw new Error(
+      "handleGetContextPackage requires ctx.adapter to be set. " +
+        "This is a configuration error — the server always provides an adapter."
+    );
+  }
+  const adapter = ctx.adapter;
 
   // -------------------------------------------------------------------------
   // 1. Architecture document
+  // Compose using queryNodes({type:'architecture'}, 1, 0) → getNodes([id])
+  // to retrieve id, title, cycle, and content from Node.properties.
   // -------------------------------------------------------------------------
 
-  const archRow = contextAdapter.queryArchitectureDocument();
+  const archQueryResult = await adapter.queryNodes({ type: "architecture" }, 1, 0);
+  const archNodeMeta = archQueryResult.nodes[0]?.node ?? null;
+  const archRow = archNodeMeta
+    ? (await adapter.getNodes([archNodeMeta.id])).get(archNodeMeta.id) ?? null
+    : null;
 
   if (archRow) {
-    if (archRow.content) {
-      const archLines = archRow.content.split("\n");
+    const archContent = typeof archRow.properties.content === "string"
+      ? archRow.properties.content
+      : null;
+    if (archContent) {
+      const archLines = archContent.split("\n");
       const archSection: string[] = [`## Architecture`];
 
       if (archLines.length <= 300) {
-        archSection.push("", archRow.content);
+        archSection.push("", archContent);
       } else {
         // Provide a component/interface summary by scanning headings and key lines
         archSection.push(
@@ -1093,18 +1099,30 @@ export async function handleGetContextPackage(
 
   // -------------------------------------------------------------------------
   // 2. Guiding Principles
+  // Compose using queryNodes({type:'guiding_principle'}, 1000, 0) → getNodes(ids)
+  // to retrieve name and description from Node.properties.
   // -------------------------------------------------------------------------
 
-  const principleRows = contextAdapter.queryGuidingPrinciples();
+  const gpQueryResult = await adapter.queryNodes({ type: "guiding_principle" }, 1000, 0);
+  const gpIds = gpQueryResult.nodes.map((n) => n.node.id);
+  const gpNodesMap = gpIds.length > 0 ? await adapter.getNodes(gpIds) : new Map();
+  // Preserve order returned by queryNodes (sorted by id ASC)
+  const principleNodes = gpIds
+    .map((id) => gpNodesMap.get(id))
+    .filter((n): n is NonNullable<typeof n> => n !== undefined);
 
-  if (principleRows.length > 0) {
+  if (principleNodes.length > 0) {
     const principleSection: string[] = [`## Guiding Principles`, ""];
 
-    for (let i = 0; i < principleRows.length; i++) {
-      const gp = principleRows[i];
-      principleSection.push(`### ${i + 1}. ${gp.name}`);
-      if (gp.description) {
-        const { text, truncated, total } = truncateLines(gp.description, 20);
+    for (let i = 0; i < principleNodes.length; i++) {
+      const gp = principleNodes[i];
+      const gpName = typeof gp.properties.name === "string" ? gp.properties.name : gp.id;
+      const gpDescription = typeof gp.properties.description === "string"
+        ? gp.properties.description
+        : null;
+      principleSection.push(`### ${i + 1}. ${gpName}`);
+      if (gpDescription) {
+        const { text, truncated, total } = truncateLines(gpDescription, 20);
         principleSection.push(text);
         if (truncated) {
           principleSection.push(`*(truncated — showing 20 of ${total} lines)*`);
@@ -1120,23 +1138,46 @@ export async function handleGetContextPackage(
 
   // -------------------------------------------------------------------------
   // 3. Constraints
+  // Compose using queryNodes({type:'constraint'}, 1000, 0) → getNodes(ids)
+  // to retrieve category and description from Node.properties.
+  // Sort client-side by category then id so output is deterministic regardless
+  // of adapter-specific row ordering.
   // -------------------------------------------------------------------------
 
-  const constraintRows = contextAdapter.queryConstraints();
+  const cQueryResult = await adapter.queryNodes({ type: "constraint" }, 1000, 0);
+  const cIds = cQueryResult.nodes.map((n) => n.node.id);
+  const cNodesMap = cIds.length > 0 ? await adapter.getNodes(cIds) : new Map();
+  const constraintNodes = cIds
+    .map((id) => cNodesMap.get(id))
+    .filter((n): n is NonNullable<typeof n> => n !== undefined)
+    // Sort by category ASC, then id ASC to produce deterministic output
+    // regardless of adapter ordering.
+    .sort((a, b) => {
+      const catA = typeof a.properties.category === "string" ? a.properties.category : "";
+      const catB = typeof b.properties.category === "string" ? b.properties.category : "";
+      if (catA !== catB) return catA.localeCompare(catB);
+      return a.id.localeCompare(b.id);
+    });
 
-  if (constraintRows.length > 0) {
+  if (constraintNodes.length > 0) {
     const constraintSection: string[] = [`## Constraints`, ""];
 
     let currentCategory = "";
-    for (const constraint of constraintRows) {
-      if (constraint.category !== currentCategory) {
-        currentCategory = constraint.category;
+    for (const constraint of constraintNodes) {
+      const constraintCategory = typeof constraint.properties.category === "string"
+        ? constraint.properties.category
+        : "";
+      const constraintDescription = typeof constraint.properties.description === "string"
+        ? constraint.properties.description
+        : null;
+      if (constraintCategory !== currentCategory) {
+        currentCategory = constraintCategory;
         constraintSection.push(`### ${currentCategory}`);
       }
 
       constraintSection.push(`**${constraint.id}**`);
-      if (constraint.description) {
-        const { text, truncated, total } = truncateLines(constraint.description, 10);
+      if (constraintDescription) {
+        const { text, truncated, total } = truncateLines(constraintDescription, 10);
         constraintSection.push(text);
         if (truncated) {
           constraintSection.push(`*(truncated — showing 10 of ${total} lines)*`);
@@ -1152,22 +1193,35 @@ export async function handleGetContextPackage(
 
   // -------------------------------------------------------------------------
   // 4. Active Project
+  // Compose using queryNodes({type:'project', status:'active'}, 1, 0) → getNodes([id])
+  // to retrieve intent, success_criteria, appetite, horizon from Node.properties.
   // -------------------------------------------------------------------------
 
-  const activeProject = contextAdapter.queryActiveProject();
+  const projQueryResult = await adapter.queryNodes({ type: "project", status: "active" }, 1, 0);
+  const projNodeMeta = projQueryResult.nodes[0]?.node ?? null;
+  const activeProjectNode = projNodeMeta
+    ? (await adapter.getNodes([projNodeMeta.id])).get(projNodeMeta.id) ?? null
+    : null;
 
-  if (activeProject) {
+  if (activeProjectNode) {
     const projectSection: string[] = [`## Active Project`, ""];
-    projectSection.push(`**ID**: ${activeProject.id}`);
-    projectSection.push(`**Intent**: ${activeProject.intent}`);
+    projectSection.push(`**ID**: ${activeProjectNode.id}`);
+    const projIntent = typeof activeProjectNode.properties.intent === "string"
+      ? activeProjectNode.properties.intent
+      : "";
+    projectSection.push(`**Intent**: ${projIntent}`);
 
-    if (activeProject.appetite) {
-      projectSection.push(`**Appetite**: ${activeProject.appetite}`);
+    const projAppetite = activeProjectNode.properties.appetite;
+    if (projAppetite) {
+      projectSection.push(`**Appetite**: ${projAppetite}`);
     }
 
-    if (activeProject.success_criteria) {
+    const projSuccessCriteria = typeof activeProjectNode.properties.success_criteria === "string"
+      ? activeProjectNode.properties.success_criteria
+      : null;
+    if (projSuccessCriteria) {
       try {
-        const criteria = JSON.parse(activeProject.success_criteria);
+        const criteria = JSON.parse(projSuccessCriteria);
         if (Array.isArray(criteria) && criteria.length > 0) {
           projectSection.push("", "**Success Criteria**:");
           for (const c of criteria as string[]) {
@@ -1175,16 +1229,19 @@ export async function handleGetContextPackage(
           }
         }
       } catch {
-        projectSection.push(`**Success Criteria**: ${activeProject.success_criteria}`);
+        projectSection.push(`**Success Criteria**: ${projSuccessCriteria}`);
       }
     }
 
-    if (activeProject.horizon) {
+    const projHorizon = typeof activeProjectNode.properties.horizon === "string"
+      ? activeProjectNode.properties.horizon
+      : null;
+    if (projHorizon) {
       try {
-        const horizon = JSON.parse(activeProject.horizon);
+        const horizon = JSON.parse(projHorizon);
         projectSection.push(`**Horizon**: ${JSON.stringify(horizon)}`);
       } catch {
-        projectSection.push(`**Horizon**: ${activeProject.horizon}`);
+        projectSection.push(`**Horizon**: ${projHorizon}`);
       }
     }
 
@@ -1193,28 +1250,46 @@ export async function handleGetContextPackage(
 
   // -------------------------------------------------------------------------
   // 5. Current Phase
+  // Compose using queryNodes({type:'phase', status:'active'}, 1, 0) → getNodes([id])
+  // to retrieve phase_type, intent, steering, work_items from Node.properties.
   // -------------------------------------------------------------------------
 
-  const activePhase = contextAdapter.queryActivePhase();
+  const phaseQueryResult = await adapter.queryNodes({ type: "phase", status: "active" }, 1, 0);
+  const phaseNodeMeta = phaseQueryResult.nodes[0]?.node ?? null;
+  const activePhaseNode = phaseNodeMeta
+    ? (await adapter.getNodes([phaseNodeMeta.id])).get(phaseNodeMeta.id) ?? null
+    : null;
 
-  if (activePhase) {
+  if (activePhaseNode) {
     const phaseSection: string[] = [`## Current Phase`, ""];
-    phaseSection.push(`**ID**: ${activePhase.id}`);
-    phaseSection.push(`**Type**: ${activePhase.phase_type}`);
-    phaseSection.push(`**Intent**: ${activePhase.intent}`);
+    phaseSection.push(`**ID**: ${activePhaseNode.id}`);
+    const phaseType = typeof activePhaseNode.properties.phase_type === "string"
+      ? activePhaseNode.properties.phase_type
+      : "";
+    const phaseIntent = typeof activePhaseNode.properties.intent === "string"
+      ? activePhaseNode.properties.intent
+      : "";
+    phaseSection.push(`**Type**: ${phaseType}`);
+    phaseSection.push(`**Intent**: ${phaseIntent}`);
 
-    if (activePhase.steering) {
-      phaseSection.push(`**Steering**: ${activePhase.steering}`);
+    const phaseSteering = typeof activePhaseNode.properties.steering === "string"
+      ? activePhaseNode.properties.steering
+      : null;
+    if (phaseSteering) {
+      phaseSection.push(`**Steering**: ${phaseSteering}`);
     }
 
-    if (activePhase.work_items) {
+    const phaseWorkItems = typeof activePhaseNode.properties.work_items === "string"
+      ? activePhaseNode.properties.work_items
+      : null;
+    if (phaseWorkItems) {
       try {
-        const workItems = JSON.parse(activePhase.work_items);
+        const workItems = JSON.parse(phaseWorkItems);
         if (Array.isArray(workItems) && workItems.length > 0) {
           phaseSection.push("", `**Work Items**: ${(workItems as string[]).join(", ")}`);
         }
       } catch {
-        phaseSection.push(`**Work Items**: ${activePhase.work_items}`);
+        phaseSection.push(`**Work Items**: ${phaseWorkItems}`);
       }
     }
 
@@ -1378,13 +1453,19 @@ export async function handleAssembleContext(
     : pprConfig.edge_type_weights;
 
   // -------------------------------------------------------------------------
-  // 3. Run PPR and assemble context via adapter or LocalContextAdapter
+  // 3. Run PPR and assemble context via adapter
   //
-  // When ctx.adapter is set (production), delegate traverse() to it so all
-  // PPR logic flows through the StorageAdapter contract. Fall back to creating
-  // a LocalContextAdapter directly for test compatibility (tests that build
-  // ToolContext without an adapter still work).
+  // Delegate traverse() to ctx.adapter so all PPR logic flows through the
+  // StorageAdapter contract. ctx.adapter is always set by the server and
+  // by updated test setups.
   // -------------------------------------------------------------------------
+
+  if (!ctx.adapter) {
+    throw new Error(
+      "handleAssembleContext requires ctx.adapter to be set. " +
+        "This is a configuration error — the server always provides an adapter."
+    );
+  }
 
   const traverseOptions = {
     seed_ids: seedNodeIds,
@@ -1396,9 +1477,7 @@ export async function handleAssembleContext(
     always_include_types: includeTypes as import("../adapter.js").NodeType[],
   };
 
-  const traversalResult = await (ctx.adapter
-    ? ctx.adapter.traverse(traverseOptions)
-    : new LocalContextAdapter(ctx.drizzleDb, ctx.db).traverse(traverseOptions));
+  const traversalResult = await ctx.adapter.traverse(traverseOptions);
 
   // -------------------------------------------------------------------------
   // 4. Assemble markdown context grouped by artifact type
@@ -1442,12 +1521,30 @@ export async function handleAssembleContext(
   // 5. Return assembled context + metadata as JSON string
   // -------------------------------------------------------------------------
 
-  const metadata = {
+  // WI-787: surface budget overflow metadata so callers can detect when
+  // always_include_types or ranked artifacts were dropped due to token_budget.
+  const metadata: {
+    artifact_ids: string[];
+    total_tokens: number;
+    ppr_scores: Array<{ id: string; score: number }>;
+    context: string;
+    budget_exhausted?: boolean;
+    truncated_types?: string[];
+  } = {
     artifact_ids: traversalResult.ranked_nodes.map((e) => e.node.id),
     total_tokens: traversalResult.total_tokens,
     ppr_scores: traversalResult.ppr_scores,
     context: assembledContext,
   };
+  if (traversalResult.budget_exhausted) {
+    metadata.budget_exhausted = true;
+  }
+  if (
+    traversalResult.truncated_types &&
+    traversalResult.truncated_types.length > 0
+  ) {
+    metadata.truncated_types = traversalResult.truncated_types;
+  }
 
   return JSON.stringify(metadata, null, 2);
 }

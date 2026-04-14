@@ -516,6 +516,43 @@ suite("Equivalence — traverse() with always_include_types", () => {
 
     assertTraversalEquivalent(local, remote, PPR_TOLERANCE);
   });
+
+  // WI-787 S1: exercise the RemoteAdapter client-side budget gate for
+  // always_include_types so that budget_exhausted and truncated_types are
+  // not regressed silently. Uses token_budget=1 so any non-seed always-include
+  // artifact overflows on both adapters.
+  it("traverse with tiny token_budget sets budget_exhausted and truncated_types on both adapters", async () => {
+    const options: TraversalOptions = {
+      seed_ids: ["WI-001"],
+      token_budget: 1,
+      always_include_types: ["guiding_principle", "constraint"],
+    };
+
+    const [local, remote] = await Promise.all([
+      adapters.local.traverse(options),
+      adapters.remote.traverse(options),
+    ]);
+
+    // Both adapters must report overflow.
+    expect(local.budget_exhausted).toBe(true);
+    expect(remote.budget_exhausted).toBe(true);
+
+    // truncated_types must be a non-empty array on both, and its contents
+    // must be a subset of the always_include_types set.
+    expect(Array.isArray(local.truncated_types)).toBe(true);
+    expect(Array.isArray(remote.truncated_types)).toBe(true);
+    expect((local.truncated_types ?? []).length).toBeGreaterThan(0);
+    expect((remote.truncated_types ?? []).length).toBeGreaterThan(0);
+
+    const allowed = new Set(["guiding_principle", "constraint"]);
+    for (const t of local.truncated_types ?? []) expect(allowed.has(t)).toBe(true);
+    for (const t of remote.truncated_types ?? []) expect(allowed.has(t)).toBe(true);
+
+    // truncated_types must agree on the set of truncated NodeTypes.
+    const localSet = new Set(local.truncated_types ?? []);
+    const remoteSet = new Set(remote.truncated_types ?? []);
+    expect([...localSet].sort()).toEqual([...remoteSet].sort());
+  });
 });
 
 // ---------------------------------------------------------------------------

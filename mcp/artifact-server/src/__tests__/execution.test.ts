@@ -13,6 +13,7 @@ import path from "path";
 import { createSchema } from "../schema.js";
 import * as dbSchema from "../db.js";
 import type { ToolContext } from "../types.js";
+import { LocalAdapter } from "../adapters/local/index.js";
 import { handleGetExecutionStatus, handleGetReviewManifest } from "../tools/execution.js";
 
 // ---------------------------------------------------------------------------
@@ -24,7 +25,7 @@ let artifactDir: string;
 let db: Database.Database;
 let ctx: ToolContext;
 
-beforeEach(() => {
+beforeEach(async () => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ideate-execution-test-"));
   artifactDir = path.join(tmpDir, "artifact");
 
@@ -33,6 +34,20 @@ beforeEach(() => {
     "archive/cycles",
     "plan/work-items",
     "domains",
+    "work-items",
+    "policies",
+    "decisions",
+    "questions",
+    "principles",
+    "constraints",
+    "modules",
+    "research",
+    "metrics",
+    "interviews",
+    "projects",
+    "phases",
+    "plan",
+    "steering",
   ]) {
     fs.mkdirSync(path.join(artifactDir, sub), { recursive: true });
   }
@@ -49,7 +64,9 @@ beforeEach(() => {
   createSchema(db);
 
   const drizzleDb = drizzle(db, { schema: dbSchema });
-  ctx = { db, drizzleDb, ideateDir: artifactDir };
+  const adapter = new LocalAdapter({ db, drizzleDb, ideateDir: artifactDir });
+  await adapter.initialize();
+  ctx = { db, drizzleDb, ideateDir: artifactDir, adapter };
 });
 
 afterEach(() => {

@@ -4,6 +4,8 @@
  * Per WI-671: Covers limit/offset and batchMutate input validation for RemoteAdapter.
  * All tests here are offline (pre-flight checks run before any GraphQL call is issued).
  * GraphQLClient is mocked so no live server is needed.
+ *
+ * Per WI-772: Validation is now performed by ValidatingAdapter wrapping RemoteAdapter.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -18,19 +20,21 @@ vi.mock("../../src/adapters/remote/client.js", () => ({
 }));
 
 import { RemoteAdapter } from "../../src/adapters/remote/index.js";
+import { ValidatingAdapter } from "../../src/validating.js";
 import { ValidationError, ImmutableFieldError } from "../../src/adapter.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function createAdapter(): RemoteAdapter {
-  return new RemoteAdapter({
+function createAdapter(): ValidatingAdapter {
+  const raw = new RemoteAdapter({
     endpoint: "http://localhost:4000/graphql",
     org_id: "test-org",
     codebase_id: "test-codebase",
     auth_token: null,
   });
+  return new ValidatingAdapter(raw);
 }
 
 // ---------------------------------------------------------------------------
@@ -38,7 +42,7 @@ function createAdapter(): RemoteAdapter {
 // ---------------------------------------------------------------------------
 
 describe("RemoteAdapter Validation Layer (WI-671)", () => {
-  let adapter: RemoteAdapter;
+  let adapter: ValidatingAdapter;
 
   beforeEach(() => {
     adapter = createAdapter();
@@ -239,7 +243,7 @@ describe("RemoteAdapter Validation Layer (WI-671)", () => {
 
     // --- MISSING_NODE_ID ---
 
-    it("throws MISSING_NODE_ID when node lacks id field", async () => {
+    it("throws INVALID_NODE_ID when node lacks id field", async () => {
       await expect(
         adapter.batchMutate({
           nodes: [
@@ -258,6 +262,7 @@ describe("RemoteAdapter Validation Layer (WI-671)", () => {
         });
       } catch (err) {
         expect(err).toBeInstanceOf(ValidationError);
+        // ValidatingAdapter throws MISSING_NODE_ID when id field is absent from batch node
         expect((err as ValidationError).code).toBe("MISSING_NODE_ID");
       }
     });
@@ -278,7 +283,7 @@ describe("RemoteAdapter Validation Layer (WI-671)", () => {
 
     // --- MISSING_NODE_TYPE ---
 
-    it("throws MISSING_NODE_TYPE when node lacks type field", async () => {
+    it("throws INVALID_NODE_TYPE when node lacks type field", async () => {
       await expect(
         adapter.batchMutate({
           nodes: [
@@ -297,6 +302,7 @@ describe("RemoteAdapter Validation Layer (WI-671)", () => {
         });
       } catch (err) {
         expect(err).toBeInstanceOf(ValidationError);
+        // ValidatingAdapter throws MISSING_NODE_TYPE when type field is absent from batch node
         expect((err as ValidationError).code).toBe("MISSING_NODE_TYPE");
       }
     });
@@ -805,7 +811,8 @@ describe("RemoteAdapter Validation Layer (WI-671)", () => {
   // =========================================================================
 
   describe("traverse — alpha boundary validation (WI-698)", () => {
-    it("throws INVALID_ALPHA when alpha is 0 (must be > 0)", async () => {
+    it("throws INVALID_ALPHA when alpha is 0 (ValidatingAdapter range is (0, 1])", async () => {
+      // ValidatingAdapter rejects alpha=0; the valid range is (0, 1] — exclusive of 0.
       const err = await adapter
         .traverse({ seed_ids: ["GP-001"], alpha: 0 })
         .catch((e) => e);

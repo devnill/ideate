@@ -1,50 +1,134 @@
 import type { ToolContext } from "../types.js";
 
 // ---------------------------------------------------------------------------
-// Types
+// Internal pagination constant
 // ---------------------------------------------------------------------------
 
-interface WorkItemRow {
+/**
+ * Upper bound for bulk queryNodes calls. Ideate projects are expected to have
+ * far fewer than 10 000 work items or findings in practice; this limit guards
+ * against unbounded fetches while avoiding a new adapter method.
+ */
+const QUERY_LIMIT = 10_000;
+
+// ---------------------------------------------------------------------------
+// Work-item helpers — composed from StorageAdapter primitives
+// ---------------------------------------------------------------------------
+
+interface WorkItemData {
   id: string;
   status: string | null;
   title: string;
-  depends: string | null;
+  /** May be a JSON string, a pre-parsed array, or null. */
+  depends: string | string[] | null;
+  scope: string | null;
 }
 
 /**
- * Query all work items from the DB using a JOIN.
+ * Fetch all work items (all statuses) via adapter composition.
+ *
+ * Strategy: queryNodes({ type: 'work_item' }) applies D-131 by default
+ * (excludes done/obsolete when no status filter is given). To capture ALL
+ * statuses we run three passes — one for each terminal status and one for the
+ * non-terminal set — then merge unique IDs, fetch full nodes via getNodes(),
+ * and extract the needed properties.
  */
-function queryAllWorkItems(ctx: ToolContext): WorkItemRow[] {
-  const stmt = ctx.db.prepare(
-    `SELECT n.id, n.status, w.title, w.depends
-     FROM nodes n
-     JOIN work_items w ON w.id = n.id`
-  );
-  return stmt.all() as WorkItemRow[];
-}
-
-/**
- * Check journal_entries for work items recorded as complete.
- * Looks for entries where title matches "Work item {id}:" and content contains "Status: complete".
- */
-function buildJournalCompletedSet(ctx: ToolContext): Set<string> {
-  const completed = new Set<string>();
-  let rows: Array<{ title: string | null; content: string | null }>;
-  try {
-    const stmt = ctx.db.prepare(
-      `SELECT title, content FROM journal_entries`
+async function fetchAllWorkItems(ctx: ToolContext): Promise<WorkItemData[]> {
+  if (!ctx.adapter) {
+    throw new Error(
+      "fetchAllWorkItems requires ctx.adapter — ensure a StorageAdapter is initialized before calling execution handlers."
     );
-    rows = stmt.all() as Array<{ title: string | null; content: string | null }>;
+  }
+  const adapter = ctx.adapter;
+
+  // Collect IDs across all status buckets.
+  const idSet = new Set<string>();
+
+  const passes = [
+    adapter.queryNodes({ type: "work_item", status: "done" }, QUERY_LIMIT, 0),
+    adapter.queryNodes({ type: "work_item", status: "obsolete" }, QUERY_LIMIT, 0),
+    adapter.queryNodes({ type: "work_item", status: "complete" }, QUERY_LIMIT, 0),
+    // No status filter → D-131 returns non-terminal items (everything except done/obsolete)
+    adapter.queryNodes({ type: "work_item" }, QUERY_LIMIT, 0),
+  ];
+
+  const results = await Promise.all(passes);
+  for (const result of results) {
+    for (const entry of result.nodes) {
+      idSet.add(entry.node.id);
+    }
+  }
+
+  if (idSet.size === 0) return [];
+
+  // Fetch full nodes (properties include title, depends, scope from work_items table).
+  const nodeMap = await adapter.getNodes([...idSet]);
+
+  const items: WorkItemData[] = [];
+  for (const [id, node] of nodeMap) {
+    const props = node.properties;
+    // depends may be stored as a JSON string or as an already-parsed array
+    const rawDepends = props.depends;
+    const depends: string | string[] | null = Array.isArray(rawDepends)
+      ? (rawDepends as string[])
+      : typeof rawDepends === "string"
+      ? rawDepends
+      : null;
+
+    items.push({
+      id,
+      status: node.status,
+      title: typeof props.title === "string" ? props.title : String(props.title ?? ""),
+      depends,
+      scope: typeof props.scope === "string" ? props.scope : null,
+    });
+  }
+
+  return items;
+}
+
+// ---------------------------------------------------------------------------
+// Journal-entry helper — composed from StorageAdapter primitives
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the set of work-item IDs recorded as complete in journal entries.
+ *
+ * Scans all journal_entry nodes for the pattern:
+ *   title:   "Work item WI-NNN: …"
+ *   content: contains "Status: complete"
+ */
+async function buildJournalCompletedSet(ctx: ToolContext): Promise<Set<string>> {
+  if (!ctx.adapter) {
+    throw new Error(
+      "buildJournalCompletedSet requires ctx.adapter — ensure a StorageAdapter is initialized before calling execution handlers."
+    );
+  }
+  const completed = new Set<string>();
+  const adapter = ctx.adapter;
+
+  let result;
+  try {
+    result = await adapter.queryNodes({ type: "journal_entry" }, QUERY_LIMIT, 0);
   } catch {
     return completed;
   }
 
-  for (const row of rows) {
-    if (!row.title || !row.content) continue;
-    // Match "Work item WI-NNN:" pattern
-    const titleMatch = row.title.match(/Work item\s+(WI-\d+):/i);
+  if (result.nodes.length === 0) return completed;
+
+  const ids = result.nodes.map((n) => n.node.id);
+  const nodeMap = await adapter.getNodes(ids);
+
+  for (const node of nodeMap.values()) {
+    const rawTitle = node.properties.title;
+    const rawContent = node.properties.content;
+    const title = typeof rawTitle === "string" ? rawTitle : null;
+    const content = typeof rawContent === "string" ? rawContent : null;
+    if (!title || !content) continue;
+
+    const titleMatch = title.match(/Work item\s+(WI-\d+):/i);
     if (!titleMatch) continue;
-    if (row.content.toLowerCase().includes("status: complete")) {
+    if (content.toLowerCase().includes("status: complete")) {
       completed.add(titleMatch[1]);
     }
   }
@@ -53,107 +137,162 @@ function buildJournalCompletedSet(ctx: ToolContext): Set<string> {
 }
 
 // ---------------------------------------------------------------------------
+// Finding helper — composed from StorageAdapter primitives
+// ---------------------------------------------------------------------------
+
+interface FindingData {
+  work_item: string;
+  severity: string;
+  verdict: string;
+  cycle: number;
+}
+
+/**
+ * Fetch all findings, optionally filtered to a specific cycle.
+ * Also returns the maximum cycle seen across all findings (for auto-detection).
+ */
+async function fetchFindings(
+  ctx: ToolContext,
+  targetCycle: number | null
+): Promise<{ findings: FindingData[]; maxCycle: number | null }> {
+  if (!ctx.adapter) {
+    throw new Error(
+      "fetchFindings requires ctx.adapter — ensure a StorageAdapter is initialized before calling execution handlers."
+    );
+  }
+  const adapter = ctx.adapter;
+
+  let result;
+  if (targetCycle !== null) {
+    result = await adapter.queryNodes(
+      { type: "finding", cycle: targetCycle },
+      QUERY_LIMIT,
+      0
+    );
+  } else {
+    result = await adapter.queryNodes({ type: "finding" }, QUERY_LIMIT, 0);
+  }
+
+  if (result.nodes.length === 0) return { findings: [], maxCycle: null };
+
+  const ids = result.nodes.map((n) => n.node.id);
+  const nodeMap = await adapter.getNodes(ids);
+
+  const findings: FindingData[] = [];
+  let maxCycle: number | null = null;
+
+  for (const node of nodeMap.values()) {
+    const props = node.properties;
+    const workItem = typeof props.work_item === "string" ? props.work_item : null;
+    const severity = typeof props.severity === "string" ? props.severity : "";
+    const verdict = typeof props.verdict === "string" ? props.verdict : "";
+    const cycle =
+      typeof props.cycle === "number"
+        ? props.cycle
+        : typeof props.cycle === "string"
+        ? parseInt(props.cycle, 10)
+        : null;
+
+    if (!workItem || cycle === null || isNaN(cycle as number)) continue;
+
+    findings.push({ work_item: workItem, severity, verdict, cycle: cycle as number });
+
+    if (maxCycle === null || (cycle as number) > maxCycle) {
+      maxCycle = cycle as number;
+    }
+  }
+
+  return { findings, maxCycle };
+}
+
+// ---------------------------------------------------------------------------
 // handleGetExecutionStatus
 // ---------------------------------------------------------------------------
 
-// Direct DB path — adapter aggregate methods not yet available
 export async function handleGetExecutionStatus(
   ctx: ToolContext,
   args: Record<string, unknown>
 ): Promise<string> {
-  // artifact_dir is now always ctx.ideateDir — resolved at server startup
-  void args; // args unused now
+  void args;
 
-  const rows = queryAllWorkItems(ctx);
-  const journalCompleted = buildJournalCompletedSet(ctx);
+  const [workItems, journalCompleted] = await Promise.all([
+    fetchAllWorkItems(ctx),
+    buildJournalCompletedSet(ctx),
+  ]);
 
   // Build dependency map: id → array of dependency IDs
+  // depends may come back as a JSON string ("[]", "[\"WI-001\"]") or as an
+  // already-parsed array if the adapter surfaces it that way.
   const dependsMap = new Map<string, string[]>();
-  for (const row of rows) {
+  for (const item of workItems) {
     let deps: string[] = [];
-    try {
-      deps = JSON.parse(row.depends || "[]") as string[];
-    } catch {
-      deps = [];
+    const raw = item.depends;
+    if (Array.isArray(raw)) {
+      deps = raw as string[];
+    } else if (typeof raw === "string" && raw.trim() !== "") {
+      try {
+        const parsed = JSON.parse(raw);
+        deps = Array.isArray(parsed) ? (parsed as string[]) : [];
+      } catch {
+        deps = [];
+      }
     }
-    dependsMap.set(row.id, deps);
+    dependsMap.set(item.id, deps);
   }
 
   // Categorise each work item
   const completedSet = new Set<string>();
   const obsoleteSet = new Set<string>();
-  const pendingSet = new Set<string>();
   const readySet = new Set<string>();
   const blockedMap = new Map<string, string[]>(); // id → unsatisfied dep IDs
 
   // First pass: determine completed and obsolete items
-  // An item is completed if:
-  //   - DB status is "done" or "complete", OR
-  //   - journal entry records it as complete
-  // An item is obsolete if:
-  //   - DB status is "obsolete"
-  for (const row of rows) {
-    const status = (row.status ?? "").toLowerCase();
+  for (const item of workItems) {
+    const status = (item.status ?? "").toLowerCase();
     if (status === "obsolete") {
-      obsoleteSet.add(row.id);
+      obsoleteSet.add(item.id);
       continue;
     }
     const isComplete =
       status === "done" ||
       status === "complete" ||
-      journalCompleted.has(row.id);
+      journalCompleted.has(item.id);
     if (isComplete) {
-      completedSet.add(row.id);
+      completedSet.add(item.id);
     }
   }
 
   // Second pass: categorise remaining items
-  for (const row of rows) {
-    if (completedSet.has(row.id)) continue;
-    if (obsoleteSet.has(row.id)) continue;
+  for (const item of workItems) {
+    if (completedSet.has(item.id)) continue;
+    if (obsoleteSet.has(item.id)) continue;
 
-    const deps = dependsMap.get(row.id) ?? [];
-    const unsatisfied = deps.filter((dep) => !completedSet.has(dep) && !obsoleteSet.has(dep));
+    const deps = dependsMap.get(item.id) ?? [];
+    const unsatisfied = deps.filter(
+      (dep) => !completedSet.has(dep) && !obsoleteSet.has(dep)
+    );
 
     if (unsatisfied.length === 0) {
-      // No unsatisfied deps — ready to execute
-      readySet.add(row.id);
+      readySet.add(item.id);
     } else {
-      // Has unmet deps — blocked
-      blockedMap.set(row.id, unsatisfied);
+      blockedMap.set(item.id, unsatisfied);
     }
   }
 
-  // Any remaining items that are neither completed, obsolete, ready, nor blocked are pending
-  // (this handles items with empty deps that were missed, shouldn't happen but guard anyway)
-  for (const row of rows) {
-    if (
-      completedSet.has(row.id) ||
-      obsoleteSet.has(row.id) ||
-      readySet.has(row.id) ||
-      blockedMap.has(row.id)
-    ) {
-      continue;
-    }
-    pendingSet.add(row.id);
-  }
-
-  const total = rows.length;
-  const pendingList = [...pendingSet].sort();
+  const total = workItems.length;
   const readyList = [...readySet].sort();
 
-  // Completed and obsolete: count only (full ID lists waste tokens at scale).
-  // Pending, ready, and blocked: full IDs (these are the actionable sets).
   const lines: string[] = [
     "## Execution Status",
     `Completed: ${completedSet.size}`,
     `Obsolete: ${obsoleteSet.size}`,
-    `Pending: ${pendingSet.size} (${pendingList.join(", ") || "none"})`,
     `Ready to execute: ${readySet.size} (${readyList.join(", ") || "none"})`,
     `Blocked: ${blockedMap.size}`,
   ];
 
-  for (const [id, unsatisfied] of [...blockedMap.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+  for (const [id, unsatisfied] of [
+    ...blockedMap.entries(),
+  ].sort(([a], [b]) => a.localeCompare(b))) {
     lines.push(`- ${id} blocked by: ${unsatisfied.join(", ")}`);
   }
 
@@ -166,37 +305,32 @@ export async function handleGetExecutionStatus(
 // handleGetReviewManifest
 // ---------------------------------------------------------------------------
 
-// Direct DB path — adapter aggregate methods not yet available
 export async function handleGetReviewManifest(
   ctx: ToolContext,
   args: Record<string, unknown>
 ): Promise<string> {
   const cycleArg = typeof args.cycle_number === "number" ? args.cycle_number : null;
 
-  const rows = queryAllWorkItems(ctx);
+  // Fetch all work items (all statuses)
+  const workItems = await fetchAllWorkItems(ctx);
 
-  // Fetch scope for each work item (stored as JSON in work_items.scope)
-  const scopeStmt = ctx.db.prepare(`SELECT id, scope FROM work_items`);
-  const scopeRows = scopeStmt.all() as Array<{ id: string; scope: string | null }>;
-  const scopeMap = new Map(scopeRows.map((r) => [r.id, r.scope]));
-
-  // Determine which cycle to show: provided cycle or max cycle in findings
+  // Determine which cycle to show
   let targetCycle: number | null = cycleArg;
-  if (targetCycle === null) {
-    const maxRow = ctx.db.prepare(`SELECT MAX(cycle) as max_cycle FROM findings`).get() as { max_cycle: number | null };
-    targetCycle = maxRow.max_cycle;
-  }
+  let allFindings: FindingData[];
 
-  // Query findings for the target cycle (or all if no cycle available)
-  let findingRows: Array<{ work_item: string; severity: string; verdict: string; cycle: number }>;
   if (targetCycle !== null) {
-    findingRows = ctx.db.prepare(
-      `SELECT work_item, severity, verdict, cycle FROM findings WHERE cycle = ?`
-    ).all(targetCycle) as Array<{ work_item: string; severity: string; verdict: string; cycle: number }>;
+    const { findings } = await fetchFindings(ctx, targetCycle);
+    allFindings = findings;
   } else {
-    findingRows = ctx.db.prepare(
-      `SELECT work_item, severity, verdict, cycle FROM findings`
-    ).all() as Array<{ work_item: string; severity: string; verdict: string; cycle: number }>;
+    // Need to discover the max cycle from all findings
+    const { findings, maxCycle } = await fetchFindings(ctx, null);
+    targetCycle = maxCycle;
+    // If we found a max cycle, re-filter to only that cycle's findings
+    if (targetCycle !== null) {
+      allFindings = findings.filter((f) => f.cycle === targetCycle);
+    } else {
+      allFindings = findings;
+    }
   }
 
   // Group findings by work_item
@@ -207,10 +341,17 @@ export async function handleGetReviewManifest(
     hasFailVerdictFinding: boolean;
     hasFindingsAtAll: boolean;
   }
+
   const reviewMap = new Map<string, WorkItemReview>();
-  for (const f of findingRows) {
+  for (const f of allFindings) {
     if (!reviewMap.has(f.work_item)) {
-      reviewMap.set(f.work_item, { critical: 0, significant: 0, minor: 0, hasFailVerdictFinding: false, hasFindingsAtAll: false });
+      reviewMap.set(f.work_item, {
+        critical: 0,
+        significant: 0,
+        minor: 0,
+        hasFailVerdictFinding: false,
+        hasFindingsAtAll: false,
+      });
     }
     const r = reviewMap.get(f.work_item)!;
     r.hasFindingsAtAll = true;
@@ -220,32 +361,31 @@ export async function handleGetReviewManifest(
     if (f.verdict === "fail") r.hasFailVerdictFinding = true;
   }
 
-  // Derive overall verdict for a work item:
-  // - "Fail" if any critical or significant findings, or any finding with verdict="fail"
-  // - "Pass" if there are only minor findings (or no findings but has been reviewed)
-  // - "None" if no findings at all for this item in this cycle
   function deriveVerdict(r: WorkItemReview | undefined): string {
     if (!r || !r.hasFindingsAtAll) return "None";
     if (r.critical > 0 || r.significant > 0 || r.hasFailVerdictFinding) return "Fail";
     return "Pass";
   }
 
-  // Build table header
-  const header = "| # | Title | File Scope | Incremental Verdict | Findings (C/S/M) |";
-  const divider = "|---|-------|------------|---------------------|------------------|";
+  const header =
+    "| # | Title | File Scope | Incremental Verdict | Findings (C/S/M) |";
+  const divider =
+    "|---|-------|------------|---------------------|------------------|";
 
   const tableRows: string[] = [];
 
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    const review = reviewMap.get(row.id);
+  for (let i = 0; i < workItems.length; i++) {
+    const item = workItems[i];
+    const review = reviewMap.get(item.id);
 
-    // Resolve scope: extract file paths from scope JSON
+    // Resolve scope from properties
     let scopeDisplay = "";
-    const rawScope = scopeMap.get(row.id) ?? null;
+    const rawScope = item.scope ?? null;
     if (rawScope) {
       try {
-        const scopeEntries = JSON.parse(rawScope) as Array<{ path?: string; op?: string } | string>;
+        const scopeEntries = JSON.parse(rawScope) as Array<
+          { path?: string; op?: string } | string
+        >;
         const paths = scopeEntries
           .map((e) => (typeof e === "string" ? e : (e.path ?? "")))
           .filter(Boolean)
@@ -257,16 +397,24 @@ export async function handleGetReviewManifest(
     }
 
     const verdict = deriveVerdict(review);
-    const findings = review && review.hasFindingsAtAll
-      ? `${review.critical}/${review.significant}/${review.minor}`
-      : "—";
+    const findings =
+      review && review.hasFindingsAtAll
+        ? `${review.critical}/${review.significant}/${review.minor}`
+        : "—";
 
     tableRows.push(
-      `| ${i + 1} | ${row.title} | ${scopeDisplay} | ${verdict} | ${findings} |`
+      `| ${i + 1} | ${item.title} | ${scopeDisplay} | ${verdict} | ${findings} |`
     );
   }
 
-  const cycleInfo = targetCycle !== null ? `(Cycle ${targetCycle})` : "(all cycles)";
-  const lines = [`## Review Manifest ${cycleInfo}`, "", header, divider, ...tableRows];
+  const cycleInfo =
+    targetCycle !== null ? `(Cycle ${targetCycle})` : "(all cycles)";
+  const lines = [
+    `## Review Manifest ${cycleInfo}`,
+    "",
+    header,
+    divider,
+    ...tableRows,
+  ];
   return lines.join("\n");
 }

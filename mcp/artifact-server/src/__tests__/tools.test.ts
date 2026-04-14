@@ -19,6 +19,7 @@ import path from "path";
 import { createSchema } from "../schema.js";
 import * as dbSchema from "../db.js";
 import type { ToolContext } from "../types.js";
+import { LocalAdapter } from "../adapters/local/index.js";
 import { handleGetArtifactContext, handleGetContextPackage, handleAssembleContext } from "../tools/context.js";
 import { handleArtifactQuery, handleGetNextId } from "../tools/query.js";
 import { handleGetExecutionStatus, handleGetReviewManifest } from "../tools/execution.js";
@@ -413,6 +414,12 @@ describe("handleGetArtifactContext — generic artifact dispatch", () => {
 // ---------------------------------------------------------------------------
 
 describe("handleGetContextPackage", () => {
+  // Attach a LocalAdapter to ctx so handlers that require ctx.adapter work.
+  beforeEach(() => {
+    ctx.adapter = new LocalAdapter({ db, drizzleDb: ctx.drizzleDb, ideateDir: artifactDir });
+  });
+
+
   it("happy path: returns markdown sections (Architecture, Guiding Principles, Constraints)", async () => {
     // Insert a document artifact of type 'architecture'
     insertNode("DOC-arch", "architecture", { file_path: path.join(artifactDir, "arch.md") });
@@ -585,6 +592,11 @@ describe("handleArtifactQuery", () => {
 // ---------------------------------------------------------------------------
 
 describe("handleGetExecutionStatus", () => {
+  // Attach LocalAdapter — handler routes all queries through ctx.adapter.
+  beforeEach(() => {
+    ctx.adapter = new LocalAdapter({ db, drizzleDb: ctx.drizzleDb, ideateDir: artifactDir });
+  });
+
   it("happy path: shows total, completed, pending, ready counts", async () => {
     insertNode("WI-001", "work_item", { status: "done" });
     insertWorkItem("WI-001", "Done item");
@@ -618,6 +630,11 @@ describe("handleGetExecutionStatus", () => {
 // ---------------------------------------------------------------------------
 
 describe("handleGetReviewManifest", () => {
+  // Attach LocalAdapter — handler routes all queries through ctx.adapter.
+  beforeEach(() => {
+    ctx.adapter = new LocalAdapter({ db, drizzleDb: ctx.drizzleDb, ideateDir: artifactDir });
+  });
+
   it("happy path: returns markdown table with work item rows", async () => {
     insertNode("WI-001", "work_item", { status: "pending" });
     insertWorkItem("WI-001", "Manifest item");
@@ -2410,6 +2427,11 @@ describe("handleWriteArtifact", () => {
 // ---------------------------------------------------------------------------
 
 describe("handleAssembleContext", () => {
+  // Attach a LocalAdapter to ctx so traverse() flows through the StorageAdapter contract.
+  beforeEach(() => {
+    ctx.adapter = new LocalAdapter({ db, drizzleDb: ctx.drizzleDb, ideateDir: artifactDir });
+  });
+
   /** Insert an edge between two existing nodes */
   function insertEdge(sourceId: string, targetId: string, edgeType: string): void {
     db.prepare(`
@@ -3479,6 +3501,7 @@ describe("P-33 compliance: no absolute .ideate/ paths in tool responses", () => 
   });
 
   it("handleGetExecutionStatus response contains no .ideate/ path", async () => {
+    ctx.adapter = new LocalAdapter({ db, drizzleDb: ctx.drizzleDb, ideateDir: artifactDir });
     insertNode("WI-P33-04", "work_item", { status: "pending" });
     insertWorkItem("WI-P33-04", "P-33 execution status item");
     const result = await handleGetExecutionStatus(ctx, {});

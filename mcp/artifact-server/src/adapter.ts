@@ -138,9 +138,25 @@ export interface TraversalOptions {
   convergence_threshold?: number;
   /** Per-edge-type weight overrides for PPR score propagation. */
   edge_type_weights?: Record<string, number>;
-  /** Maximum token budget for context assembly. */
+  /**
+   * Maximum token budget for context assembly. Defaults to 50000 when omitted.
+   *
+   * Contract invariant (WI-787, Option 1 — Budget-capped always-include):
+   *   - Seeds (seed_ids) are force-included even if they would exceed the budget.
+   *   - Every other artifact — including always_include_types — is
+   *     budget-gated: once inclusion would bust the budget, the artifact is
+   *     skipped and TraversalResult.budget_exhausted is set to true.
+   *   - Always-include types are pulled in preference order but not
+   *     unconditionally. This replaces the pre-WI-787 behavior where
+   *     always_include_types bypassed the budget and caused overflow.
+   */
   token_budget?: number;
-  /** Node types to always include regardless of PPR score. */
+  /**
+   * Node types to include preferentially (fetched regardless of PPR
+   * reachability) but still subject to token_budget. If dropping an artifact
+   * of one of these types due to budget, its NodeType is recorded in
+   * TraversalResult.truncated_types.
+   */
   always_include_types?: NodeType[];
   /** Maximum number of nodes to process in PPR. If graph exceeds this, returns empty result. Default: 10000. */
   max_nodes?: number;
@@ -157,6 +173,18 @@ export interface TraversalResult {
   total_tokens: number;
   /** Top-N PPR scores for metadata/debugging. */
   ppr_scores: Array<{ id: string; score: number }>;
+  /**
+   * True when one or more artifacts were skipped because including them would
+   * have exceeded token_budget. Applies to both always_include_types and
+   * ranked artifacts. Callers use this to detect incomplete context.
+   */
+  budget_exhausted?: boolean;
+  /**
+   * NodeTypes for which at least one always-include artifact was skipped due
+   * to budget. Empty/absent when budget_exhausted is false or when only ranked
+   * (non-always-include) artifacts were truncated.
+   */
+  truncated_types?: NodeType[];
 }
 
 // ---------------------------------------------------------------------------

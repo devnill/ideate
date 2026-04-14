@@ -75,8 +75,8 @@ import type {
   BatchMutateResult,
   NodeType,
 } from "../../adapter.js";
-import { ImmutableFieldError, ValidationError, ALL_NODE_TYPES } from "../../adapter.js";
-import { EDGE_TYPES } from "../../schema.js";
+import { ValidationError } from "../../adapter.js";
+import { CYCLE_SCOPED_TYPES } from "../../validating.js";
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -97,20 +97,11 @@ function ensureDir(dirPath: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// Cycle-scoped type detection
-// ---------------------------------------------------------------------------
-
-const CYCLE_SCOPED_TYPES = new Set([
-  "finding", "cycle_summary", "review_output", "review_manifest", "decision_log",
-  "proxy_human_decision",
-]);
-
-// ---------------------------------------------------------------------------
 // resolveArtifactPath — determine output path for an artifact
 // ---------------------------------------------------------------------------
 
 export function resolveArtifactPath(ideateDir: string, type: string, id: string, cycle?: number): string {
-  if (CYCLE_SCOPED_TYPES.has(type)) {
+  if (CYCLE_SCOPED_TYPES.has(type as NodeType)) {
     if (cycle === undefined || cycle === null) {
       throw new Error(`Type '${type}' requires a cycle parameter`);
     }
@@ -534,17 +525,6 @@ export class LocalWriterAdapter {
   // -------------------------------------------------------------------------
 
   async putNode(input: MutateNodeInput): Promise<MutateNodeResult> {
-    // Input validation
-    if (typeof input.id !== 'string' || input.id.trim() === '') {
-      throw new ValidationError('Node id must be a non-empty string', 'INVALID_NODE_ID', { value: input.id });
-    }
-    if (!ALL_NODE_TYPES.includes(input.type as NodeType)) {
-      throw new ValidationError(`Invalid NodeType: ${input.type}`, 'INVALID_NODE_TYPE', { value: input.type });
-    }
-    if (input.properties == null) {
-      throw new ValidationError('Node properties must be provided', 'MISSING_NODE_PROPERTIES', {});
-    }
-
     const { id, type, properties: content, cycle } = input;
 
     // Determine output path
@@ -631,7 +611,7 @@ export class LocalWriterAdapter {
     fs.writeFileSync(absoluteFilePath, finalYaml, "utf8");
 
     // Phase 2 — SQLite upserts in a single exclusive transaction
-    const cycleForNode = CYCLE_SCOPED_TYPES.has(type) && cycle !== undefined
+    const cycleForNode = CYCLE_SCOPED_TYPES.has(type as NodeType) && cycle !== undefined
       ? cycle
       : (finalYamlObj.cycle_created as number | null) ?? null;
     const finalCycleModified = finalYamlObj.cycle_modified as number | null;
@@ -696,20 +676,7 @@ export class LocalWriterAdapter {
   // -------------------------------------------------------------------------
 
   async patchNode(input: UpdateNodeInput): Promise<UpdateNodeResult> {
-    // Input validation
-    if (typeof input.id !== 'string' || input.id.trim() === '') {
-      throw new ValidationError('Node id must be a non-empty string', 'INVALID_NODE_ID', { value: input.id });
-    }
-
     const { id, properties } = input;
-
-    // Reject immutable fields
-    const IMMUTABLE = ["id", "type", "cycle_created"];
-    for (const field of IMMUTABLE) {
-      if (field in properties) {
-        throw new ImmutableFieldError(field);
-      }
-    }
 
     // Determine file path for work items (only work_item type supports patchNode for now)
     // Find the node's file_path from the index
@@ -890,9 +857,6 @@ export class LocalWriterAdapter {
   // -------------------------------------------------------------------------
 
   async deleteNode(id: string): Promise<DeleteNodeResult> {
-    if (typeof id !== 'string' || id.trim() === '') {
-      throw new ValidationError('Node id must be a non-empty string', 'INVALID_NODE_ID', { value: id });
-    }
     const nodeRow = this.db.prepare(
       `SELECT file_path FROM nodes WHERE id = ?`
     ).get(id) as { file_path: string } | undefined;
@@ -961,18 +925,6 @@ export class LocalWriterAdapter {
   // -------------------------------------------------------------------------
 
   async putEdge(edge: Edge): Promise<void> {
-    if (!edge.source_id || edge.source_id.trim() === '') {
-      throw new ValidationError('Edge source_id required', 'MISSING_EDGE_SOURCE', {});
-    }
-    if (!edge.target_id || edge.target_id.trim() === '') {
-      throw new ValidationError('Edge target_id required', 'MISSING_EDGE_TARGET', {});
-    }
-    if (!edge.edge_type) {
-      throw new ValidationError('Edge type required', 'MISSING_EDGE_TYPE', {});
-    }
-    if (!(EDGE_TYPES as readonly string[]).includes(edge.edge_type)) {
-      throw new ValidationError(`Invalid EdgeType: ${edge.edge_type}`, 'INVALID_EDGE_TYPE', { value: edge.edge_type });
-    }
     try {
       insertEdge(this.drizzleDb, {
         source_id: edge.source_id,
@@ -996,14 +948,6 @@ export class LocalWriterAdapter {
   // -------------------------------------------------------------------------
 
   async removeEdges(source_id: string, edge_types: EdgeType[]): Promise<void> {
-    if (typeof source_id !== 'string' || source_id.trim() === '') {
-      throw new ValidationError('source_id must be a non-empty string', 'INVALID_NODE_ID', { value: source_id });
-    }
-    for (const edge_type of edge_types) {
-      if (!(EDGE_TYPES as readonly string[]).includes(edge_type)) {
-        throw new ValidationError(`Invalid EdgeType: ${edge_type}`, 'INVALID_EDGE_TYPE', { value: edge_type });
-      }
-    }
     if (edge_types.length === 0) return;
     const placeholders = edge_types.map(() => "?").join(", ");
     try {
@@ -1027,89 +971,6 @@ export class LocalWriterAdapter {
     const { nodes, edges: extraEdges = [] } = input;
     const results: MutateNodeResult[] = [];
     const errors: Array<{ id: string; error: string }> = [];
-
-    // ---------- Input validation ----------
-    if (!nodes || nodes.length === 0) {
-      throw new ValidationError(
-        "Batch mutation requires at least one node",
-        "EMPTY_BATCH",
-        {}
-      );
-    }
-
-    const validNodeTypes = new Set<string>(ALL_NODE_TYPES);
-
-    for (const node of nodes) {
-      // Validate node has an id property (can be null/undefined for auto-generation)
-      if (!("id" in node)) {
-        throw new ValidationError(
-          "Node is missing required 'id' field",
-          "MISSING_NODE_ID",
-          { node }
-        );
-      }
-
-      if (node.type === undefined || node.type === null) {
-        throw new ValidationError(
-          "Node is missing required 'type' field",
-          "MISSING_NODE_TYPE",
-          { id: node.id }
-        );
-      }
-
-      if (!node.properties || typeof node.properties !== "object") {
-        throw new ValidationError(
-          "Node is missing required 'properties' field",
-          "MISSING_NODE_PROPERTIES",
-          { id: node.id }
-        );
-      }
-
-      if (!validNodeTypes.has(node.type)) {
-        throw new ValidationError(
-          `Invalid node type: "${node.type}"`,
-          "INVALID_NODE_TYPE",
-          { id: node.id, type: node.type }
-        );
-      }
-    }
-
-    // Valid edge types for validation
-    const validEdgeTypes = new Set<string>(EDGE_TYPES);
-
-    for (const edge of extraEdges) {
-      if (!edge.source_id) {
-        throw new ValidationError(
-          "Edge is missing required 'source_id' field",
-          "MISSING_EDGE_SOURCE",
-          { edge }
-        );
-      }
-
-      if (!edge.target_id) {
-        throw new ValidationError(
-          "Edge is missing required 'target_id' field",
-          "MISSING_EDGE_TARGET",
-          { edge }
-        );
-      }
-
-      if (!edge.edge_type) {
-        throw new ValidationError(
-          "Edge is missing required 'edge_type' field",
-          "MISSING_EDGE_TYPE",
-          { edge }
-        );
-      }
-
-      if (!validEdgeTypes.has(edge.edge_type)) {
-        throw new ValidationError(
-          `Invalid edge type: "${edge.edge_type}"`,
-          "INVALID_EDGE_TYPE",
-          { edge }
-        );
-      }
-    }
 
     // ---------- Assign IDs to nodes that don't have one ----------
     // For work_item nodes, query current max ID
@@ -1308,7 +1169,7 @@ export class LocalWriterAdapter {
           const parsedWritten = parseYaml(writtenContent) as Record<string, unknown>;
           const contentHash = computeArtifactHash(parsedWritten);
 
-          const cycleForNode = CYCLE_SCOPED_TYPES.has(type) && cycle !== undefined
+          const cycleForNode = CYCLE_SCOPED_TYPES.has(type as NodeType) && cycle !== undefined
             ? cycle
             : (properties.cycle_created as number | null) ?? null;
 

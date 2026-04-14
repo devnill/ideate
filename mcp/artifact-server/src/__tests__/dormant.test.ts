@@ -26,7 +26,7 @@ import {
 } from "../server.js";
 import { IDEATE_SUBDIRS, createIdeateDir } from "../config.js";
 import { artifactWatcher } from "../watcher.js";
-import { LocalAdapter } from "../adapters/local/index.js";
+import { ValidatingAdapter } from "../validating.js";
 
 // ---------------------------------------------------------------------------
 // Setup / teardown
@@ -354,13 +354,13 @@ describe("initServer failure", () => {
     }
   });
 
-  it("after initServer, ctx.adapter is non-null and instanceof LocalAdapter", () => {
+  it("after initServer, ctx.adapter is non-null and instanceof ValidatingAdapter", () => {
     const state = createDormantState();
     const ideateDir = createIdeateDir(tmpDir);
     initServer(ideateDir, state);
     expect(state.ctx).not.toBeNull();
     expect(state.ctx!.adapter).toBeDefined();
-    expect(state.ctx!.adapter).toBeInstanceOf(LocalAdapter);
+    expect(state.ctx!.adapter).toBeInstanceOf(ValidatingAdapter);
     state.db?.close();
   });
 });

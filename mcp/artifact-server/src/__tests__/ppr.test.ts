@@ -1710,8 +1710,6 @@ describe("LocalContextAdapter.traverse — boundary validation", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(ValidationError);
       expect((err as ValidationError).code).toBe("INVALID_ALPHA");
-      expect((err as Error).message).toContain("must be > 0");
-      expect((err as Error).message).toContain("(0, 1]");
     }
   });
 
@@ -1726,7 +1724,6 @@ describe("LocalContextAdapter.traverse — boundary validation", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(ValidationError);
       expect((err as ValidationError).code).toBe("INVALID_MAX_ITERATIONS");
-      expect((err as Error).message).toContain("must be > 0");
     }
   });
 

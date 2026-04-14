@@ -20,7 +20,6 @@ import type {
   Node,
   NodeType,
 } from "../../adapter.js";
-import { ValidationError, ALL_NODE_TYPES } from "../../adapter.js";
 
 // ---------------------------------------------------------------------------
 // Internal row types
@@ -173,97 +172,6 @@ export class LocalContextAdapter {
       max_nodes: maxNodes,
     } = options;
 
-    // Validate seed_ids (WI-653)
-    if (!Array.isArray(seedNodeIds)) {
-      throw new ValidationError(
-        "seed_ids must be an array",
-        "INVALID_SEED_IDS",
-        { value: seedNodeIds }
-      );
-    }
-    if (seedNodeIds.length === 0) {
-      throw new ValidationError(
-        "seed_ids cannot be empty",
-        "EMPTY_SEED_IDS",
-        {}
-      );
-    }
-    for (const id of seedNodeIds) {
-      if (typeof id !== "string") {
-        throw new ValidationError(
-          `Each seed_id must be a string, received ${typeof id}`,
-          "INVALID_SEED_ID",
-          { value: id }
-        );
-      }
-    }
-
-    // Validate always_include_types BEFORE other validations (AC-3: WI-649)
-    // This ensures type validation errors are reported before PPR computation
-    if (!Array.isArray(alwaysIncludeTypes)) {
-      throw new ValidationError(
-        "always_include_types must be an array",
-        "INVALID_ALWAYS_INCLUDE_TYPE",
-        { value: alwaysIncludeTypes }
-      );
-    }
-    const validNodeTypes = new Set<string>(ALL_NODE_TYPES);
-    for (const type of alwaysIncludeTypes) {
-      if (!validNodeTypes.has(type)) {
-        throw new ValidationError(
-          `Invalid NodeType in always_include_types: ${type}`,
-          "INVALID_ALWAYS_INCLUDE_TYPE",
-          { value: type }
-        );
-      }
-    }
-
-    // Validate PPR parameters before calling computePPR (WI-663)
-    // token_budget: must be non-negative
-    if (tokenBudget !== undefined && tokenBudget < 0) {
-      throw new ValidationError(
-        `token_budget must be non-negative (valid range: 0 to Infinity), received ${tokenBudget}`,
-        "INVALID_TOKEN_BUDGET",
-        { value: tokenBudget }
-      );
-    }
-
-    // alpha: must be > 0 and <= 1
-    if (alpha !== undefined && (alpha <= 0 || alpha > 1)) {
-      throw new ValidationError(
-        `alpha must be > 0 (valid range: (0, 1]), received ${alpha}`,
-        "INVALID_ALPHA",
-        { value: alpha }
-      );
-    }
-
-    // max_iterations: must be a positive integer (> 0)
-    if (maxIterations !== undefined && (!Number.isInteger(maxIterations) || maxIterations <= 0)) {
-      throw new ValidationError(
-        `max_iterations must be > 0 (valid range: 1 to Infinity), received ${maxIterations}`,
-        "INVALID_MAX_ITERATIONS",
-        { value: maxIterations }
-      );
-    }
-
-    // convergence_threshold: must be positive number
-    if (convergenceThreshold !== undefined && convergenceThreshold <= 0) {
-      throw new ValidationError(
-        `convergence_threshold must be a positive number (valid range: > 0), received ${convergenceThreshold}`,
-        "INVALID_CONVERGENCE_THRESHOLD",
-        { value: convergenceThreshold }
-      );
-    }
-
-    // max_nodes: must be non-negative integer
-    if (maxNodes !== undefined && (!Number.isInteger(maxNodes) || maxNodes < 0)) {
-      throw new ValidationError(
-        `max_nodes must be a non-negative integer (valid range: 0 to Infinity), received ${maxNodes}`,
-        "INVALID_MAX_NODES",
-        { value: maxNodes }
-      );
-    }
-
     // Run PPR algorithm (ppr.ts is an adapter-internal dependency)
     const pprResults = computePPR(this.drizzleDb, seedNodeIds, {
       alpha,
@@ -354,6 +262,15 @@ export class LocalContextAdapter {
 
     const contentCache = new Map<string, string>(); // file_path -> content
     let usedTokens = 0;
+    // WI-787 Option 1: always-include types respect the token budget. Seeds
+    // are the sole exception — they are force-included even if they exceed
+    // the budget (callers explicitly asked for them). Non-seed always-include
+    // artifacts are dropped once the budget would be exceeded, and we track
+    // which NodeTypes were truncated so callers can detect incomplete context.
+    const effectiveTokenBudget = tokenBudget ?? 50000;
+    const seedIdSet = new Set(seedNodeIds);
+    const truncatedTypeSet = new Set<NodeType>();
+    let budgetExhausted = false;
 
     const includedWithContent: Array<{
       row: NodeRow;
@@ -361,23 +278,61 @@ export class LocalContextAdapter {
       tokenCount: number;
     }> = [];
 
-    // Always-include first (seeds + include_types)
+    // Always-include first (seeds + include_types). Seeds are force-included;
+    // other always-include artifacts are budget-gated.
+    //
+    // Fast-path budget check: row.token_count is populated by putNode (see
+    // adapters/local/writer.ts) so we can gate on it without reading the file.
+    // This avoids wasted disk I/O when many always-include artifacts would be
+    // truncated (e.g. 500 work items with a budget of a few thousand tokens).
+    // The content read is still necessary for the included artifacts and as a
+    // fallback when token_count is null (legacy rows that predate indexing).
     for (const row of alwaysInclude) {
+      const isSeed = seedIdSet.has(row.id);
+
+      if (!isSeed && row.token_count !== null) {
+        if (usedTokens + row.token_count > effectiveTokenBudget) {
+          budgetExhausted = true;
+          truncatedTypeSet.add(row.type as NodeType);
+          continue;
+        }
+      }
+
       const content = readFileContent(row.file_path);
       contentCache.set(row.file_path, content);
       const tokenCount = row.token_count ?? estimateTokens(content);
+
+      if (isSeed) {
+        usedTokens += tokenCount;
+        includedWithContent.push({ row, content, tokenCount });
+        continue;
+      }
+
+      // Re-check for the token_count === null fallback path (content was
+      // read to estimate tokens; we still need to honor the budget).
+      if (usedTokens + tokenCount > effectiveTokenBudget) {
+        budgetExhausted = true;
+        truncatedTypeSet.add(row.type as NodeType);
+        continue;
+      }
       usedTokens += tokenCount;
       includedWithContent.push({ row, content, tokenCount });
     }
 
     // Then add ranked artifacts by score until budget exhausted
-    const effectiveTokenBudget = tokenBudget ?? 50000;
     for (const row of ranked) {
-      if (usedTokens >= effectiveTokenBudget) break;
+      if (usedTokens >= effectiveTokenBudget) {
+        budgetExhausted = true;
+        break;
+      }
       const content = readFileContent(row.file_path);
       contentCache.set(row.file_path, content);
       const tokenCount = row.token_count ?? estimateTokens(content);
-      if (usedTokens + tokenCount > effectiveTokenBudget) continue; // skip if would bust budget
+      if (usedTokens + tokenCount > effectiveTokenBudget) {
+        // skip if would bust budget
+        budgetExhausted = true;
+        continue;
+      }
       usedTokens += tokenCount;
       includedWithContent.push({ row, content, tokenCount });
     }
@@ -396,11 +351,16 @@ export class LocalContextAdapter {
       .slice(0, 20)
       .map((r) => ({ id: r.nodeId, score: r.score }));
 
-    return {
+    const result: TraversalResult = {
       ranked_nodes: rankedNodes,
       total_tokens: usedTokens,
       ppr_scores: top20PprScores,
     };
+    if (budgetExhausted) result.budget_exhausted = true;
+    if (truncatedTypeSet.size > 0) {
+      result.truncated_types = Array.from(truncatedTypeSet);
+    }
+    return result;
   }
 
   // -------------------------------------------------------------------------

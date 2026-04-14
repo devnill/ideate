@@ -34,6 +34,7 @@ import { createSchema } from "../../src/schema.js";
 import * as dbSchema from "../../src/db.js";
 import { LocalAdapter } from "../../src/adapters/local/index.js";
 import { RemoteAdapter } from "../../src/adapters/remote/index.js";
+import { ValidatingAdapter } from "../../src/validating.js";
 import { ConnectionError, ImmutableFieldError } from "../../src/adapter.js";
 import type {
   StorageAdapter,
@@ -70,7 +71,7 @@ async function isRemoteServerAvailable(): Promise<boolean> {
 // -----------------------------------------------------------------------------
 
 interface LocalAdapterSetup {
-  adapter: LocalAdapter;
+  adapter: StorageAdapter;
   tmpDir: string;
   db: Database.Database;
 }
@@ -115,8 +116,9 @@ async function createLocalAdapter(): Promise<LocalAdapterSetup> {
 
   const drizzleDb = drizzle(db, { schema: dbSchema });
 
-  const adapter = new LocalAdapter({ db, drizzleDb, ideateDir });
-  await adapter.initialize();
+  const raw = new LocalAdapter({ db, drizzleDb, ideateDir });
+  await raw.initialize();
+  const adapter = new ValidatingAdapter(raw);
 
   return { adapter, tmpDir, db };
 }

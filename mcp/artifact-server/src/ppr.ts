@@ -107,7 +107,7 @@ export function computePPR(
   const maxNodes = options?.maxNodes ?? 10000;
 
   // Validate alpha: must be 0 < alpha <= 1
-  if (alpha <= 0 || alpha > 1) {
+  if (!Number.isFinite(alpha) || alpha <= 0 || alpha > 1) {
     throw new ValidationError(
       `alpha must be between 0 and 1 (exclusive of 0, inclusive of 1), received ${alpha}`,
       "INVALID_ALPHA",
@@ -125,7 +125,7 @@ export function computePPR(
   }
 
   // Validate convergenceThreshold: must be positive number
-  if (convergenceThreshold <= 0) {
+  if (!Number.isFinite(convergenceThreshold) || convergenceThreshold <= 0) {
     throw new ValidationError(
       `convergenceThreshold must be a positive number, received ${convergenceThreshold}`,
       "INVALID_CONVERGENCE_THRESHOLD",

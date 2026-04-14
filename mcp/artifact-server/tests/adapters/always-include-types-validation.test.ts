@@ -19,13 +19,14 @@ import { LocalAdapter } from "../../src/adapters/local/index.js";
 import { RemoteAdapter } from "../../src/adapters/remote/index.js";
 import { ValidationError, ALL_NODE_TYPES } from "../../src/adapter.js";
 import type { StorageAdapter, NodeType } from "../../src/adapter.js";
+import { ValidatingAdapter } from "../../src/validating.js";
 
 // -----------------------------------------------------------------------------
 // Test Setup Helpers
 // -----------------------------------------------------------------------------
 
 interface LocalAdapterSetup {
-  adapter: LocalAdapter;
+  adapter: StorageAdapter;
   tmpDir: string;
   db: Database.Database;
 }
@@ -70,8 +71,9 @@ async function createLocalAdapter(): Promise<LocalAdapterSetup> {
 
   const drizzleDb = drizzle(db, { schema: dbSchema });
 
-  const adapter = new LocalAdapter({ db, drizzleDb, ideateDir });
-  await adapter.initialize();
+  const rawAdapter = new LocalAdapter({ db, drizzleDb, ideateDir });
+  await rawAdapter.initialize();
+  const adapter = new ValidatingAdapter(rawAdapter);
 
   return { adapter, tmpDir, db };
 }
@@ -346,19 +348,19 @@ describe("always_include_types validation (WI-649)", () => {
   // -----------------------------------------------------------------------------
 
   describe("AC-3: Validation occurs before PPR computation", () => {
-    it("LocalAdapter throws validation error even with invalid PPR params", async () => {
-      // Both always_include_types and alpha are invalid
-      // Should throw for always_include_types BEFORE alpha validation
+    it("LocalAdapter throws validation error even when other params are present", async () => {
+      // always_include_types is invalid; other params are valid
+      // ValidatingAdapter validates always_include_types after seed_ids and alpha
       try {
         await localSetup.adapter.traverse({
           seed_ids: ["GP-TEST-SEED"],
           always_include_types: ["bad_type"],
-          alpha: -1, // Also invalid
+          alpha: 0.85, // Valid alpha — isolate always_include_types validation
           token_budget: 10000,
         });
         expect.fail("Should have thrown");
       } catch (err) {
-        // Should be validation error about the type, not alpha
+        // Should be validation error about the type
         expect((err as ValidationError).message).toContain("bad_type");
       }
     });
