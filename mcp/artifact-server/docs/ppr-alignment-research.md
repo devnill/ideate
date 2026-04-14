@@ -36,7 +36,7 @@ LocalAdapter PPR operates in-memory on data fetched from SQLite:
 | alpha range | ppr.ts:109 | VALIDATION_ERROR |
 | maxIterations positive | ppr.ts:118 | VALIDATION_ERROR |
 | convergenceThreshold positive | ppr.ts:127 | VALIDATION_ERROR |
-| maxNodes non-negative | ppr.ts:136 | VALIDATION_ERROR |
+| ~~maxNodes non-negative~~ | (removed in WI-789, see D-210) | n/a |
 | always_include_types valid | context.ts:204 | VALIDATION_ERROR |
 
 ### 1.3 Key Algorithm Parameters
