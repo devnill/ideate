@@ -34,6 +34,7 @@ import {
   ALL_EDGE_TYPES,
   ValidationError,
   ImmutableFieldError,
+  MetricsEventRow,
 } from "../adapter.js";
 import { ValidatingAdapter, CYCLE_SCOPED_TYPES } from "../validating.js";
 import type { EdgeType } from "../schema.js";
@@ -148,6 +149,19 @@ function createMockAdapter(): MockAdapter {
     async queryNodes(filter, limit, offset) {
       calls.push({ method: "queryNodes", args: [filter, limit, offset] });
       return minimalQueryResult;
+    },
+
+    async getMetricsEvents(filter?: NodeFilter): Promise<MetricsEventRow[]> {
+      calls.push({ method: "getMetricsEvents", args: [filter] });
+      return [];
+    },
+
+    async indexFiles(paths: string[]): Promise<void> {
+      calls.push({ method: "indexFiles", args: [paths] });
+    },
+
+    async removeFiles(paths: string[]): Promise<void> {
+      calls.push({ method: "removeFiles", args: [paths] });
     },
 
     async nextId(type, cycle) {

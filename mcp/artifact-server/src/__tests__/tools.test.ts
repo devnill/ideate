@@ -578,6 +578,71 @@ describe("handleArtifactQuery", () => {
     expect(idMatches("WI-TEST-B")).toHaveLength(1);
     expect(idMatches("WI-TEST-C")).toHaveLength(1);
   });
+
+  it("column structure: Cycle column is populated from cycle_created; no Domain column", async () => {
+    // Regression for CR-S1: Domain/Cycle columns were permanently empty in queryNodes path.
+    insertNode("WI-COL-01", "work_item", { status: "pending", cycle_created: 7 });
+    insertWorkItem("WI-COL-01", "Column structure test item");
+
+    const result = await handleArtifactQuery(ctx, { type: "work_item" });
+
+    // Parse header row
+    const lines = result.split("\n");
+    const headerLine = lines[0];
+
+    // Cycle header must be present
+    expect(headerLine).toContain("Cycle");
+    // Domain header must NOT be present
+    expect(headerLine).not.toContain("Domain");
+
+    // Find the data row for WI-COL-01 and verify cycle value "7" appears
+    const dataRow = lines.find((l) => l.includes("WI-COL-01"));
+    expect(dataRow).toBeDefined();
+    expect(dataRow).toContain("7");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleGetArtifactContext / handleArtifactQuery / handleGetNextId
+// adapter-required guard tests (GA-S1)
+// ---------------------------------------------------------------------------
+
+describe("adapter-required guard tests", () => {
+  it("handleGetArtifactContext throws when ctx.adapter is not set", async () => {
+    const noAdapterCtx: ToolContext = {
+      db: ctx.db,
+      drizzleDb: ctx.drizzleDb,
+      ideateDir: ctx.ideateDir,
+      // adapter intentionally omitted
+    };
+    await expect(handleGetArtifactContext(noAdapterCtx, { artifact_id: "WI-001" })).rejects.toThrow(
+      "context.ts: ToolContext.adapter is required"
+    );
+  });
+
+  it("handleArtifactQuery throws when ctx.adapter is not set", async () => {
+    const noAdapterCtx: ToolContext = {
+      db: ctx.db,
+      drizzleDb: ctx.drizzleDb,
+      ideateDir: ctx.ideateDir,
+      // adapter intentionally omitted
+    };
+    await expect(handleArtifactQuery(noAdapterCtx, { type: "work_item" })).rejects.toThrow(
+      "query.ts: ToolContext.adapter is required"
+    );
+  });
+
+  it("handleGetNextId throws when ctx.adapter is not set", async () => {
+    const noAdapterCtx: ToolContext = {
+      db: ctx.db,
+      drizzleDb: ctx.drizzleDb,
+      ideateDir: ctx.ideateDir,
+      // adapter intentionally omitted
+    };
+    await expect(handleGetNextId(noAdapterCtx, { type: "work_item" })).rejects.toThrow(
+      "query.ts: ToolContext.adapter is required"
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

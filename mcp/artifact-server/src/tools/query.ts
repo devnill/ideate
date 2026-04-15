@@ -223,12 +223,13 @@ export async function handleArtifactQuery(
       n.node.type,
       n.node.status ?? "",
       truncate(n.summary),
-      "",
-      "",
+      n.node.cycle_created !== null && n.node.cycle_created !== undefined
+        ? String(n.node.cycle_created)
+        : "",
     ]);
 
     const table = markdownTable(
-      ["ID", "Type", "Status", "Summary", "Domain", "Cycle"],
+      ["ID", "Type", "Status", "Summary", "Cycle"],
       tableRows
     );
 

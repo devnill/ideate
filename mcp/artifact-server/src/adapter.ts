@@ -204,6 +204,8 @@ export interface NodeFilter {
   phase?: string;
   work_item?: string;
   work_item_type?: string;
+  /** Agent type filter — used by getMetricsEvents; matched inside payload JSON. */
+  agent_type?: string;
 }
 
 export interface GraphQuery {
@@ -280,6 +282,44 @@ export interface BatchMutateResult {
   results: MutateNodeResult[];
   /** Any validation errors (e.g., DAG cycles, scope collisions). */
   errors: Array<{ id: string; error: string }>;
+}
+
+// ---------------------------------------------------------------------------
+// MetricsEvent types — used by getMetricsEvents
+// ---------------------------------------------------------------------------
+
+/**
+ * Properties of a metrics_event node, mirroring the metrics_events extension
+ * table columns. All fields nullable because rows may be sparsely populated.
+ */
+export interface MetricsEventProperties {
+  event_name: string | null;
+  timestamp: string | null;
+  payload: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cache_read_tokens: number | null;
+  cache_write_tokens: number | null;
+  outcome: string | null;
+  finding_count: number | null;
+  finding_severities: string | null;
+  first_pass_accepted: number | null;
+  rework_count: number | null;
+  work_item_total_tokens: number | null;
+  cycle_total_tokens: number | null;
+  cycle_total_cost_estimate: string | null;
+  convergence_cycles: number | null;
+  context_artifact_ids: string | null;
+}
+
+/**
+ * A single metrics event row: node metadata + typed extension properties.
+ * Returned by getMetricsEvents to eliminate the N+1 fetchExtensionProperties
+ * pattern (CR-S2 / RF-clean-interface-proposal §2 Option B).
+ */
+export interface MetricsEventRow {
+  node: NodeMeta;
+  properties: MetricsEventProperties;
 }
 
 // ---------------------------------------------------------------------------
@@ -402,6 +442,47 @@ export interface StorageAdapter {
     limit: number,
     offset: number
   ): Promise<QueryResult>;
+
+  /**
+   * Fetch all metrics_event rows matching the optional filter in a single
+   * round-trip (O(1) adapter calls regardless of result count).
+   *
+   * LocalAdapter: executes a single SELECT … JOIN nodes … JOIN metrics_events.
+   * RemoteAdapter: executes a single GraphQL query or stubs with a compatible
+   *   fallback until the remote backend exposes the endpoint.
+   *
+   * Filters (all optional):
+   *   - cycle: matched against node.cycle_created
+   *   - agent_type: matched inside the payload JSON field
+   *   - work_item: matched inside the payload JSON field (exact match)
+   *   - phase: matched inside the payload JSON field
+   *
+   * Results are ordered timestamp ASC, id ASC (matching the pre-WI-808
+   * TypeScript sort in handleGetMetrics).
+   */
+  getMetricsEvents(filter?: NodeFilter): Promise<MetricsEventRow[]>;
+
+  /**
+   * Incrementally index specific file paths into the SQLite index.
+   * Called by the artifact watcher on add/change events.
+   *
+   * LocalAdapter: delegates to the indexer's indexFiles() function.
+   * RemoteAdapter: no-op stub (remote index is maintained server-side).
+   *
+   * @param paths - Absolute file paths to index. Non-YAML paths are ignored.
+   */
+  indexFiles(paths: string[]): Promise<void>;
+
+  /**
+   * Remove file paths from the SQLite index.
+   * Called by the artifact watcher on unlink events.
+   *
+   * LocalAdapter: delegates to the indexer's removeFiles() function.
+   * RemoteAdapter: no-op stub (remote index is maintained server-side).
+   *
+   * @param paths - Absolute file paths to remove from the index.
+   */
+  removeFiles(paths: string[]): Promise<void>;
 
   /**
    * Generate the next available ID for a given node type.

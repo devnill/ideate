@@ -14,7 +14,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 
-import type { StorageAdapter, Node, NodeType, QueryResult } from "../adapter.js";
+import type { StorageAdapter, Node, NodeType, QueryResult, NodeFilter, MetricsEventRow } from "../adapter.js";
 import type { ToolContext } from "../types.js";
 import { handleEmitMetric, handleGetMetrics } from "../tools/metrics.js";
 
@@ -76,9 +76,13 @@ function makeNode(
 
 function buildMockAdapter(nodes: MockNodes): {
   adapter: StorageAdapter;
+  getMetricsEventsCalls: Array<NodeFilter | undefined>;
+  // Legacy call trackers retained for backward-compatibility with existing tests
+  // that verify no unexpected queryNodes/getNodes calls are made.
   queryNodesCalls: Array<{ filter: unknown; limit: number; offset: number }>;
   getNodesCalls: Array<string[]>;
 } {
+  const getMetricsEventsCalls: Array<NodeFilter | undefined> = [];
   const queryNodesCalls: Array<{ filter: unknown; limit: number; offset: number }> = [];
   const getNodesCalls: Array<string[]> = [];
 
@@ -86,10 +90,109 @@ function buildMockAdapter(nodes: MockNodes): {
     throw new Error(`MockAdapter.${name} was called unexpectedly`);
   };
 
+  /**
+   * Convert a Node from the mock map to a MetricsEventRow.
+   * The Node's properties already match MetricsEventProperties shape.
+   */
+  function nodeToMetricsEventRow(node: Node): MetricsEventRow {
+    const p = node.properties;
+    function num(v: unknown): number | null {
+      if (v === null || v === undefined) return null;
+      if (typeof v === "number") return v;
+      const n = Number(v);
+      return isNaN(n) ? null : n;
+    }
+    function str(v: unknown): string | null {
+      if (v === null || v === undefined) return null;
+      return String(v);
+    }
+    return {
+      node: {
+        id: node.id,
+        type: node.type,
+        status: node.status,
+        cycle_created: node.cycle_created,
+        cycle_modified: node.cycle_modified,
+        content_hash: node.content_hash,
+        token_count: node.token_count,
+      },
+      properties: {
+        event_name: str(p.event_name),
+        timestamp: str(p.timestamp),
+        payload: str(p.payload),
+        input_tokens: num(p.input_tokens),
+        output_tokens: num(p.output_tokens),
+        cache_read_tokens: num(p.cache_read_tokens),
+        cache_write_tokens: num(p.cache_write_tokens),
+        outcome: str(p.outcome),
+        finding_count: num(p.finding_count),
+        finding_severities: str(p.finding_severities),
+        first_pass_accepted: num(p.first_pass_accepted),
+        rework_count: num(p.rework_count),
+        work_item_total_tokens: num(p.work_item_total_tokens),
+        cycle_total_tokens: num(p.cycle_total_tokens),
+        cycle_total_cost_estimate: str(p.cycle_total_cost_estimate),
+        convergence_cycles: num(p.convergence_cycles),
+        context_artifact_ids: str(p.context_artifact_ids),
+      },
+    };
+  }
+
   const adapter: StorageAdapter = {
+    async getMetricsEvents(filter?: NodeFilter): Promise<MetricsEventRow[]> {
+      getMetricsEventsCalls.push(filter);
+      let results = Array.from(nodes.values())
+        .filter((n) => n.type === "metrics_event")
+        .map(nodeToMetricsEventRow);
+
+      // Apply filters matching LocalAdapter behavior
+      if (filter) {
+        if (filter.cycle !== undefined && filter.cycle !== null) {
+          results = results.filter((r) => r.node.cycle_created === filter.cycle);
+        }
+        if (filter.agent_type !== undefined) {
+          results = results.filter((r) => {
+            if (!r.properties.payload) return false;
+            try {
+              const p = JSON.parse(r.properties.payload) as Record<string, unknown>;
+              return p.agent_type === filter.agent_type;
+            } catch { return false; }
+          });
+        }
+        if (filter.work_item !== undefined) {
+          results = results.filter((r) => {
+            if (!r.properties.payload) return false;
+            try {
+              const p = JSON.parse(r.properties.payload) as Record<string, unknown>;
+              return p.work_item === filter.work_item;
+            } catch { return false; }
+          });
+        }
+        if (filter.phase !== undefined) {
+          results = results.filter((r) => {
+            if (!r.properties.payload) return false;
+            try {
+              const p = JSON.parse(r.properties.payload) as Record<string, unknown>;
+              return p.phase === filter.phase;
+            } catch { return false; }
+          });
+        }
+      }
+
+      // Sort: timestamp ASC, id ASC
+      results.sort((a, b) => {
+        const tA = a.properties.timestamp ?? "";
+        const tB = b.properties.timestamp ?? "";
+        if (tA < tB) return -1;
+        if (tA > tB) return 1;
+        return a.node.id.localeCompare(b.node.id);
+      });
+
+      return results;
+    },
+
     async queryNodes(filter, limit, offset): Promise<QueryResult> {
       queryNodesCalls.push({ filter, limit, offset });
-      // Return all nodes whose type matches (filter.type = "metrics_event")
       const matching = Array.from(nodes.values()).filter(
         (n) => !filter.type || n.type === filter.type
       );
@@ -128,9 +231,11 @@ function buildMockAdapter(nodes: MockNodes): {
     shutdown: notImplemented("shutdown") as StorageAdapter["shutdown"],
     archiveCycle: notImplemented("archiveCycle") as StorageAdapter["archiveCycle"],
     appendJournalEntry: notImplemented("appendJournalEntry") as StorageAdapter["appendJournalEntry"],
+    indexFiles: async (_paths: string[]) => { /* no-op stub */ },
+    removeFiles: async (_paths: string[]) => { /* no-op stub */ },
   };
 
-  return { adapter, queryNodesCalls, getNodesCalls };
+  return { adapter, getMetricsEventsCalls, queryNodesCalls, getNodesCalls };
 }
 
 // ---------------------------------------------------------------------------
@@ -202,12 +307,16 @@ describe("handleEmitMetric", () => {
       expect(result).toBe("Metric emission deprecated — event not recorded.");
     });
 
-    it("does not write metrics.jsonl", async () => {
-      await handleEmitMetric(minimalCtx, { payload: { event_name: "test" } });
-      const jsonlPath = path.join(os.tmpdir(), "metrics.jsonl");
-      // The file should not have been created by this handler
-      // (it may exist from other tests — we just verify the handler didn't create it here)
-      // Test passes trivially since handler is a no-op
+    it("does not write metrics.jsonl in tmpDir", async () => {
+      // Use the per-test tmpDir (isolated from other tests) to verify no file is created.
+      const isolatedCtx: ToolContext = {
+        db: undefined as unknown as ToolContext["db"],
+        drizzleDb: undefined as unknown as ToolContext["drizzleDb"],
+        ideateDir: tmpDir,
+      };
+      await handleEmitMetric(isolatedCtx, { payload: { event_name: "test" } });
+      const jsonlPath = path.join(tmpDir, "metrics.jsonl");
+      expect(fs.existsSync(jsonlPath)).toBe(false);
     });
   });
 });
@@ -229,19 +338,20 @@ describe("handleGetMetrics", () => {
       );
     });
 
-    it("routes data through adapter — queryNodes and getNodes are called", async () => {
+    it("routes data through adapter — getMetricsEvents is called (single O(1) call)", async () => {
       const nodes: MockNodes = new Map([
         ["m1", makeNode("m1", "code-reviewer", { agent_type: "code-reviewer" }, { inputTokens: 100 })],
       ]);
-      const { adapter, queryNodesCalls, getNodesCalls } = buildMockAdapter(nodes);
+      const { adapter, getMetricsEventsCalls, queryNodesCalls, getNodesCalls } = buildMockAdapter(nodes);
       const ctx = makeCtx(adapter);
 
       await handleGetMetrics(ctx, { scope: "agent" });
 
-      expect(queryNodesCalls).toHaveLength(1);
-      expect(queryNodesCalls[0].filter).toMatchObject({ type: "metrics_event" });
-      expect(getNodesCalls).toHaveLength(1);
-      expect(getNodesCalls[0]).toContain("m1");
+      // Exactly one adapter call regardless of result count (eliminates N+1)
+      expect(getMetricsEventsCalls).toHaveLength(1);
+      // queryNodes and getNodes must NOT be called by handleGetMetrics
+      expect(queryNodesCalls).toHaveLength(0);
+      expect(getNodesCalls).toHaveLength(0);
     });
   });
 
@@ -578,6 +688,60 @@ describe("handleGetMetrics", () => {
       expect(result).toContain("Filters**: cycle: 5, agent_type: code-reviewer");
       expect(result).toContain("**Total events**: 2");
     });
+
+    // GA-S3: Three-dimensional filter combinations (a) cycle + agent_type + phase
+    it("(3D-a) cycle + agent_type + phase — only rows matching all three pass", async () => {
+      // Dataset: rows matching all/some/none of the three filters
+      const nodes: MockNodes = new Map([
+        // Matches all three: cycle=7, agent_type="reviewer", phase="review"
+        ["m1", makeNode("m1", "e", { agent_type: "reviewer", phase: "review" }, { cycleCreated: 7 })],
+        // Matches cycle + agent_type but NOT phase
+        ["m2", makeNode("m2", "e", { agent_type: "reviewer", phase: "execute" }, { cycleCreated: 7 })],
+        // Matches cycle + phase but NOT agent_type
+        ["m3", makeNode("m3", "e", { agent_type: "architect", phase: "review" }, { cycleCreated: 7 })],
+        // Matches agent_type + phase but NOT cycle
+        ["m4", makeNode("m4", "e", { agent_type: "reviewer", phase: "review" }, { cycleCreated: 8 })],
+        // Matches none
+        ["m5", makeNode("m5", "e", { agent_type: "worker", phase: "execute" }, { cycleCreated: 6 })],
+      ]);
+      const { adapter } = buildMockAdapter(nodes);
+      const ctx = makeCtx(adapter);
+
+      const result = await handleGetMetrics(ctx, {
+        filter: { cycle: 7, agent_type: "reviewer", phase: "review" },
+      });
+
+      expect(result).toContain("Filters**: cycle: 7, agent_type: reviewer, phase: review");
+      // Only m1 matches all three dimensions
+      expect(result).toContain("**Total events**: 1");
+    });
+
+    // GA-S3: Three-dimensional filter combinations (b) phase + work_item
+    it("(3D-b) phase + work_item — only rows matching both pass, non-matching rows excluded", async () => {
+      // Dataset: rows matching all/some/none of the two filters
+      const nodes: MockNodes = new Map([
+        // Matches both: phase="execute", work_item="WI-500"
+        ["n1", makeNode("n1", "e", { phase: "execute", work_item: "WI-500" }, {})],
+        // Matches both again
+        ["n2", makeNode("n2", "e", { phase: "execute", work_item: "WI-500" }, {})],
+        // Matches phase but NOT work_item
+        ["n3", makeNode("n3", "e", { phase: "execute", work_item: "WI-501" }, {})],
+        // Matches work_item but NOT phase
+        ["n4", makeNode("n4", "e", { phase: "review", work_item: "WI-500" }, {})],
+        // Matches neither
+        ["n5", makeNode("n5", "e", { phase: "review", work_item: "WI-999" }, {})],
+      ]);
+      const { adapter } = buildMockAdapter(nodes);
+      const ctx = makeCtx(adapter);
+
+      const result = await handleGetMetrics(ctx, {
+        filter: { phase: "execute", work_item: "WI-500" },
+      });
+
+      expect(result).toContain("Filters**: work_item: WI-500, phase: execute");
+      // Only n1 and n2 match both dimensions
+      expect(result).toContain("**Total events**: 2");
+    });
   });
 
   describe("scope selection", () => {
@@ -641,7 +805,7 @@ describe("handleGetMetrics", () => {
   describe("RemoteAdapter path (mock adapter, no ctx.db)", () => {
     it("returns metrics from adapter without touching ctx.db", async () => {
       // Simulate a RemoteAdapter scenario: ctx.db is undefined.
-      // handleGetMetrics must fetch all data from the adapter.
+      // handleGetMetrics must fetch all data from the adapter via getMetricsEvents.
       const nodes: MockNodes = new Map([
         [
           "remote-m1",
@@ -662,15 +826,15 @@ describe("handleGetMetrics", () => {
           ),
         ],
       ]);
-      const { adapter, queryNodesCalls, getNodesCalls } = buildMockAdapter(nodes);
+      const { adapter, getMetricsEventsCalls, queryNodesCalls, getNodesCalls } = buildMockAdapter(nodes);
       const ctx = makeCtx(adapter); // ctx.db is undefined
 
       const result = await handleGetMetrics(ctx, { scope: "agent" });
 
-      // Verify adapter was called (not ctx.db)
-      expect(queryNodesCalls).toHaveLength(1);
-      expect(queryNodesCalls[0].filter).toMatchObject({ type: "metrics_event" });
-      expect(getNodesCalls).toHaveLength(1);
+      // Exactly one adapter call (getMetricsEvents), not queryNodes+getNodes
+      expect(getMetricsEventsCalls).toHaveLength(1);
+      expect(queryNodesCalls).toHaveLength(0);
+      expect(getNodesCalls).toHaveLength(0);
 
       // Verify results come from the mock adapter's data
       expect(result).toContain("code-reviewer");
@@ -679,30 +843,31 @@ describe("handleGetMetrics", () => {
       expect(result).toContain("1500"); // input tokens for code-reviewer
     });
 
-    it("getNodes is not called when queryNodes returns no results", async () => {
-      const { adapter, queryNodesCalls, getNodesCalls } = buildMockAdapter(new Map());
+    it("getMetricsEvents is called exactly once even with zero results", async () => {
+      const { adapter, getMetricsEventsCalls, queryNodesCalls, getNodesCalls } = buildMockAdapter(new Map());
       const ctx = makeCtx(adapter);
 
       await handleGetMetrics(ctx, {});
 
-      expect(queryNodesCalls).toHaveLength(1);
-      // getNodes should not be called if there are no node IDs
+      // One call to getMetricsEvents, no calls to queryNodes or getNodes
+      expect(getMetricsEventsCalls).toHaveLength(1);
+      expect(queryNodesCalls).toHaveLength(0);
       expect(getNodesCalls).toHaveLength(0);
     });
 
-    it("cycle filter applied in TypeScript from node.cycle_created (no SQL needed)", async () => {
+    it("cycle filter applied via getMetricsEvents (O(1) adapter call, no SQL cycle column)", async () => {
       const nodes: MockNodes = new Map([
         ["r1", makeNode("r1", "agent", { agent_type: "agent-x" }, { cycleCreated: 3 })],
         ["r2", makeNode("r2", "agent", { agent_type: "agent-x" }, { cycleCreated: 4 })],
         ["r3", makeNode("r3", "agent", { agent_type: "agent-x" }, { cycleCreated: 3 })],
       ]);
-      const { adapter, queryNodesCalls } = buildMockAdapter(nodes);
+      const { adapter, getMetricsEventsCalls } = buildMockAdapter(nodes);
       const ctx = makeCtx(adapter);
 
       const result = await handleGetMetrics(ctx, { filter: { cycle: 3 } });
 
-      // queryNodes is called WITHOUT a cycle filter (filtering happens in TS)
-      expect(queryNodesCalls[0].filter).not.toHaveProperty("cycle");
+      // getMetricsEvents is called once with the cycle filter embedded
+      expect(getMetricsEventsCalls).toHaveLength(1);
       expect(result).toContain("**Total events**: 2");
     });
   });

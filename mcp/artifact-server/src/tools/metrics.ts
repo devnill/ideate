@@ -1,5 +1,5 @@
 import type { ToolContext } from "../types.js";
-import type { Node } from "../adapter.js";
+import type { MetricsEventRow } from "../adapter.js";
 
 // ---------------------------------------------------------------------------
 // Adapter resolution
@@ -118,49 +118,34 @@ interface LocalMetricsEventRow {
 
 
 /**
- * Map a Node returned by adapter.getNodes() to the LocalMetricsEventRow shape
- * used by the aggregation functions.
+ * Map a MetricsEventRow returned by adapter.getMetricsEvents() to the
+ * LocalMetricsEventRow shape used by the aggregation functions.
  *
- * node.properties contains all columns from the metrics_events extension table
- * (event_name, timestamp, payload, input_tokens, etc.) because LocalAdapter's
- * fetchExtensionProperties does SELECT * FROM metrics_events WHERE id = ?.
- * RemoteAdapter is expected to provide the same fields in Node.properties for
- * metrics_event nodes.
+ * Preserved only for parity — MetricsEventRow already carries typed properties
+ * so this is a straightforward projection.
  */
-function nodeToMetricsRow(node: Node): LocalMetricsEventRow {
-  const p = node.properties;
-
-  function num(v: unknown): number | null {
-    if (v === null || v === undefined) return null;
-    if (typeof v === "number") return v;
-    const n = Number(v);
-    return isNaN(n) ? null : n;
-  }
-  function str(v: unknown): string | null {
-    if (v === null || v === undefined) return null;
-    return String(v);
-  }
-
+function metricsRowToLocal(row: MetricsEventRow): LocalMetricsEventRow {
+  const p = row.properties;
   return {
-    id: node.id,
-    event_name: typeof p.event_name === "string" ? p.event_name : node.id,
-    timestamp: str(p.timestamp),
-    payload: str(p.payload),
-    input_tokens: num(p.input_tokens),
-    output_tokens: num(p.output_tokens),
-    cache_read_tokens: num(p.cache_read_tokens),
-    cache_write_tokens: num(p.cache_write_tokens),
-    outcome: str(p.outcome),
-    finding_count: num(p.finding_count),
-    finding_severities: str(p.finding_severities),
-    first_pass_accepted: num(p.first_pass_accepted),
-    rework_count: num(p.rework_count),
-    work_item_total_tokens: num(p.work_item_total_tokens),
-    cycle_total_tokens: num(p.cycle_total_tokens),
-    cycle_total_cost_estimate: str(p.cycle_total_cost_estimate),
-    convergence_cycles: num(p.convergence_cycles),
-    context_artifact_ids: str(p.context_artifact_ids),
-    cycle_created: node.cycle_created,
+    id: row.node.id,
+    event_name: p.event_name ?? row.node.id,
+    timestamp: p.timestamp,
+    payload: p.payload,
+    input_tokens: p.input_tokens,
+    output_tokens: p.output_tokens,
+    cache_read_tokens: p.cache_read_tokens,
+    cache_write_tokens: p.cache_write_tokens,
+    outcome: p.outcome,
+    finding_count: p.finding_count,
+    finding_severities: p.finding_severities,
+    first_pass_accepted: p.first_pass_accepted,
+    rework_count: p.rework_count,
+    work_item_total_tokens: p.work_item_total_tokens,
+    cycle_total_tokens: p.cycle_total_tokens,
+    cycle_total_cost_estimate: p.cycle_total_cost_estimate,
+    convergence_cycles: p.convergence_cycles,
+    context_artifact_ids: p.context_artifact_ids,
+    cycle_created: row.node.cycle_created,
   };
 }
 
@@ -198,7 +183,6 @@ function aggregateByAgent(rows: LocalMetricsEventRow[]): AgentAggregate[] {
     total_input: number;
     total_output: number;
     total_cache_read: number;
-    total_total_tokens: number;
     finding_count: number;
     sev_critical: number;
     sev_significant: number;
@@ -222,7 +206,6 @@ function aggregateByAgent(rows: LocalMetricsEventRow[]): AgentAggregate[] {
         total_input: 0,
         total_output: 0,
         total_cache_read: 0,
-        total_total_tokens: 0,
         finding_count: 0,
         sev_critical: 0,
         sev_significant: 0,
@@ -235,7 +218,6 @@ function aggregateByAgent(rows: LocalMetricsEventRow[]): AgentAggregate[] {
     agg.total_input += row.input_tokens ?? 0;
     agg.total_output += row.output_tokens ?? 0;
     agg.total_cache_read += row.cache_read_tokens ?? 0;
-    agg.total_total_tokens += (row.input_tokens ?? 0) + (row.output_tokens ?? 0);
     agg.finding_count += row.finding_count ?? 0;
 
     const sevs = parseFindingSeverities(row.finding_severities);
@@ -250,7 +232,6 @@ function aggregateByAgent(rows: LocalMetricsEventRow[]): AgentAggregate[] {
 
   const result: AgentAggregate[] = [];
   for (const [agent_type, agg] of map.entries()) {
-    const totalTokens = agg.total_input + agg.total_output;
     const avgInput = agg.event_count > 0 ? Math.round(agg.total_input / agg.event_count) : 0;
     const avgOutput = agg.event_count > 0 ? Math.round(agg.total_output / agg.event_count) : 0;
     // Cache hit rate = cache_read_tokens / total_input_tokens
@@ -515,78 +496,16 @@ export async function handleGetMetrics(
 
   const adapter = getAdapter(ctx);
 
-  // Fetch all metric_event nodes via the adapter. queryNodes returns NodeMeta
-  // only; getNodes returns full Node objects whose .properties contain all
-  // metrics_events extension columns (event_name, input_tokens, payload, etc.).
-  // Filters are applied in TypeScript after fetching because:
-  //   - cycle maps to node.cycle_created (NodeFilter.cycle only applies for
-  //     node types where hasColumn("cycle") is true, which excludes
-  //     metrics_event in the local adapter).
-  //   - agent_type, work_item, phase live inside the payload JSON field and
-  //     are not queryable through NodeFilter.
-  const METRICS_FETCH_LIMIT = 100_000;
-  const queryResult = await adapter.queryNodes(
-    { type: "metrics_event" },
-    METRICS_FETCH_LIMIT,
-    0
+  // Fetch all metrics_event rows in a single adapter call (O(1) round-trips).
+  // getMetricsEvents handles both SQL-side and TypeScript-side filtering
+  // internally — cycle is matched against node.cycle_created; agent_type,
+  // work_item, and phase are matched inside the payload JSON field.
+  // Results are ordered timestamp ASC, id ASC by the adapter.
+  const metricsEvents = await adapter.getMetricsEvents(
+    filter ? { type: "metrics_event", ...filter } : { type: "metrics_event" }
   );
-  const nodeIds = queryResult.nodes.map(({ node }) => node.id);
 
-  let rows: LocalMetricsEventRow[];
-
-  if (nodeIds.length === 0) {
-    rows = [];
-  } else {
-    const nodesMap = await adapter.getNodes(nodeIds);
-    const allRows = Array.from(nodesMap.values()).map(nodeToMetricsRow);
-
-    // Apply TypeScript-side filters (mirrors the SQL WHERE fragments).
-    rows = allRows.filter((row) => {
-      if (filter?.cycle !== undefined && row.cycle_created !== filter.cycle) {
-        return false;
-      }
-      if (filter?.agent_type !== undefined) {
-        let payloadAgentType: string | null = null;
-        if (row.payload) {
-          try {
-            const p = JSON.parse(row.payload) as Record<string, unknown>;
-            if (typeof p.agent_type === "string") payloadAgentType = p.agent_type;
-          } catch { /* ignore */ }
-        }
-        if (payloadAgentType !== filter.agent_type) return false;
-      }
-      if (filter?.work_item !== undefined) {
-        let payloadWorkItem: string | null = null;
-        if (row.payload) {
-          try {
-            const p = JSON.parse(row.payload) as Record<string, unknown>;
-            if (typeof p.work_item === "string") payloadWorkItem = p.work_item;
-          } catch { /* ignore */ }
-        }
-        if (payloadWorkItem !== filter.work_item) return false;
-      }
-      if (filter?.phase !== undefined) {
-        let payloadPhase: string | null = null;
-        if (row.payload) {
-          try {
-            const p = JSON.parse(row.payload) as Record<string, unknown>;
-            if (typeof p.phase === "string") payloadPhase = p.phase;
-          } catch { /* ignore */ }
-        }
-        if (payloadPhase !== filter.phase) return false;
-      }
-      return true;
-    });
-
-    // Restore ordering consistent with the original SQL (timestamp ASC, id ASC).
-    rows.sort((a, b) => {
-      const tA = a.timestamp ?? "";
-      const tB = b.timestamp ?? "";
-      if (tA < tB) return -1;
-      if (tA > tB) return 1;
-      return a.id.localeCompare(b.id);
-    });
-  }
+  const rows: LocalMetricsEventRow[] = metricsEvents.map(metricsRowToLocal);
 
   const sections: string[] = [];
   sections.push("# Metrics Report");

@@ -18,7 +18,9 @@ import type {
   GraphQuery,
   QueryResult,
   NodeFilter,
+  MetricsEventRow,
 } from "../../adapter.js";
+import { indexFiles as indexerIndexFiles, removeFiles as indexerRemoveFiles } from "../../indexer.js";
 import { ValidationError } from "../../adapter.js";
 import { LocalWriterAdapter, type LocalWriterConfig } from "./writer.js";
 import { LocalReaderAdapter } from "./reader.js";
@@ -116,6 +118,18 @@ export class LocalAdapter extends LocalWriterAdapter implements StorageAdapter {
       throw new ValidationError("Offset must be a non-negative integer", "INVALID_OFFSET", { offset });
     }
     return this.reader.queryNodes(filter, limit, offset);
+  }
+
+  async getMetricsEvents(filter?: NodeFilter): Promise<MetricsEventRow[]> {
+    return this.reader.getMetricsEvents(filter);
+  }
+
+  async indexFiles(paths: string[]): Promise<void> {
+    indexerIndexFiles(this.db, this.drizzleDb, paths);
+  }
+
+  async removeFiles(paths: string[]): Promise<void> {
+    indexerRemoveFiles(this.db, this.drizzleDb, paths);
   }
 
   // -------------------------------------------------------------------------

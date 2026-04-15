@@ -139,6 +139,8 @@ Tool handler: handleArtifactQuery(ctx, args)
 
 ### 2.4 Remote Mode — Write Path
 
+> The RemoteAdapter communicates with ideate-server over GraphQL. For the full schema, see [graphql-schema.md](./graphql-schema.md).
+
 ```
 Tool handler: handleWriteArtifact(ctx, args)
   │
@@ -336,51 +338,27 @@ await adapter.patchNode({
 
 **Refactored call**: The entire PPR + budgeting + content loading collapses into a single `adapter.traverse(options)` call. The handler formats the returned `TraversalResult` into markdown.
 
-### 3.3 Inventory: tools/query.ts (789 lines)
+### 3.3 Inventory: tools/query.ts (~237 lines, post-WI-804)
 
-#### handleGetNextId (lines 26-80)
+The helper sub-functions `runFilterMode`, `runGraphMode`, and `buildSummaryMap` that appeared in earlier versions of this document were deleted by WI-804 as part of enforcing the clean-interface invariants (no direct SQLite access in tool handlers). The file now contains two exported handlers and two small formatting utilities.
 
-| Line Range | Operation | Classification | Adapter Method |
-|---|---|---|---|
-| 55-65 | Query max ID for cycle-scoped types | Storage | `nextId` |
-| 69-78 | Query max ID for standard types | Storage | `nextId` |
-
-**Refactored call**: `const id = await adapter.nextId(type, cycle)`
-
-#### runFilterMode (lines 263-384)
+#### handleGetNextId (lines 41-60)
 
 | Line Range | Operation | Classification | Adapter Method |
 |---|---|---|---|
-| 270-384 | Build dynamic SQL, execute query, count | Storage | `queryNodes` |
+| 58-59 | Delegate to adapter | Storage | `nextId` |
 
-**Refactored call**: `adapter.queryNodes(filter, limit, offset)`
+**Current call**: `adapter.nextId(type, cycle)`
 
-#### runGraphMode (lines 390-601)
-
-| Line Range | Operation | Classification | Adapter Method |
-|---|---|---|---|
-| 400-415 | Verify seed node, dispatch by depth | Storage | `queryGraph` |
-| 423-477 | Depth-1 edge query | Storage | `queryGraph` (depth=1) |
-| 479-554 | Recursive CTE traversal | Storage | `queryGraph` (depth>1) |
-| 556-601 | Execute traversal with filters, pagination | Storage | `queryGraph` |
-
-**Refactored call**: `adapter.queryGraph(query, limit, offset)`
-
-#### buildSummaryMap (lines 608-644)
+#### handleArtifactQuery (lines 93-237)
 
 | Line Range | Operation | Classification | Adapter Method |
 |---|---|---|---|
-| 608-644 | Fetch summaries by joining extension tables | Storage | `queryGraph` / `queryNodes` (summary in result) |
+| 97-139 | Parse and validate arguments | Business logic | stays |
+| 143-197 | Route to graph traversal, format table | Business logic + Storage | `queryGraph` |
+| 199-236 | Route to node filter, format table | Business logic + Storage | `queryNodes` |
 
-The adapter includes summary computation in query results, eliminating the need for a separate summary fetch.
-
-#### handleArtifactQuery (lines 679-789)
-
-| Line Range | Operation | Classification | Adapter Method |
-|---|---|---|---|
-| 683-718 | Parse and validate arguments | Business logic | stays |
-| 720-762 | Route to graph mode, format table | Business logic + Storage | handler + `queryGraph` |
-| 763-788 | Route to filter mode, format table | Business logic + Storage | handler + `queryNodes` |
+`handleArtifactQuery` delegates directly to `adapter.queryGraph` (when `related_to` is provided) or `adapter.queryNodes` (otherwise). There are no intermediate helper sub-functions; all storage access goes through the adapter.
 
 ### 3.4 Inventory: tools/analysis.ts (696 lines)
 

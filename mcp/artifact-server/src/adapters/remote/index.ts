@@ -28,6 +28,8 @@ import type {
   BatchMutateInput,
   BatchMutateResult,
   AdapterConfig,
+  MetricsEventRow,
+  MetricsEventProperties,
 } from "../../adapter.js";
 
 import { ConnectionError, ValidationError, StorageAdapterError } from "../../adapter.js";
@@ -1029,6 +1031,135 @@ export class RemoteAdapter implements StorageAdapter {
     };
   }
 
+  /**
+   * Fetch metrics events in a single round-trip.
+   *
+   * Remote backend stub: the ideate-server GraphQL API does not yet expose a
+   * dedicated metricsEvents query. This implementation falls back to the
+   * queryNodes + getNodes two-step pattern (same as the pre-WI-808 path)
+   * to preserve correctness while keeping the adapter interface clean.
+   *
+   * When the remote backend adds a metricsEvents query this stub should be
+   * replaced with a single GraphQL call matching the LocalAdapter JOIN shape.
+   */
+  async getMetricsEvents(filter?: NodeFilter): Promise<MetricsEventRow[]> {
+    // Step 1: fetch all metrics_event node IDs
+    const METRICS_FETCH_LIMIT = 100_000;
+    const queryResult = await this.queryNodes(
+      { type: "metrics_event" },
+      METRICS_FETCH_LIMIT,
+      0
+    );
+
+    const ids = queryResult.nodes.map(({ node }) => node.id);
+    if (ids.length === 0) return [];
+
+    // Step 2: fetch full nodes (properties include all metrics_events columns)
+    const nodesMap = await this.getNodes(ids);
+
+    const EMPTY_PROPERTIES: MetricsEventProperties = {
+      event_name: null,
+      timestamp: null,
+      payload: null,
+      input_tokens: null,
+      output_tokens: null,
+      cache_read_tokens: null,
+      cache_write_tokens: null,
+      outcome: null,
+      finding_count: null,
+      finding_severities: null,
+      first_pass_accepted: null,
+      rework_count: null,
+      work_item_total_tokens: null,
+      cycle_total_tokens: null,
+      cycle_total_cost_estimate: null,
+      convergence_cycles: null,
+      context_artifact_ids: null,
+    };
+
+    function num(v: unknown): number | null {
+      if (v === null || v === undefined) return null;
+      if (typeof v === "number") return v;
+      const n = Number(v);
+      return isNaN(n) ? null : n;
+    }
+    function str(v: unknown): string | null {
+      if (v === null || v === undefined) return null;
+      return String(v);
+    }
+
+    let results: MetricsEventRow[] = Array.from(nodesMap.values()).map((node) => {
+      const p = node.properties;
+      const properties: MetricsEventProperties = {
+        ...EMPTY_PROPERTIES,
+        event_name: typeof p.event_name === "string" ? p.event_name : str(p.event_name),
+        timestamp: str(p.timestamp),
+        payload: str(p.payload),
+        input_tokens: num(p.input_tokens),
+        output_tokens: num(p.output_tokens),
+        cache_read_tokens: num(p.cache_read_tokens),
+        cache_write_tokens: num(p.cache_write_tokens),
+        outcome: str(p.outcome),
+        finding_count: num(p.finding_count),
+        finding_severities: str(p.finding_severities),
+        first_pass_accepted: num(p.first_pass_accepted),
+        rework_count: num(p.rework_count),
+        work_item_total_tokens: num(p.work_item_total_tokens),
+        cycle_total_tokens: num(p.cycle_total_tokens),
+        cycle_total_cost_estimate: str(p.cycle_total_cost_estimate),
+        convergence_cycles: num(p.convergence_cycles),
+        context_artifact_ids: str(p.context_artifact_ids),
+      };
+      const { properties: _props, ...nodeMeta } = node;
+      return { node: nodeMeta, properties };
+    });
+
+    // Apply TypeScript-side filters (matching LocalAdapter behavior)
+    if (filter) {
+      if (filter.cycle !== undefined && filter.cycle !== null) {
+        results = results.filter((r) => r.node.cycle_created === filter.cycle);
+      }
+      if (filter.agent_type !== undefined) {
+        results = results.filter((r) => {
+          if (!r.properties.payload) return false;
+          try {
+            const p = JSON.parse(r.properties.payload) as Record<string, unknown>;
+            return p.agent_type === filter.agent_type;
+          } catch { return false; }
+        });
+      }
+      if (filter.work_item !== undefined) {
+        results = results.filter((r) => {
+          if (!r.properties.payload) return false;
+          try {
+            const p = JSON.parse(r.properties.payload) as Record<string, unknown>;
+            return p.work_item === filter.work_item;
+          } catch { return false; }
+        });
+      }
+      if (filter.phase !== undefined) {
+        results = results.filter((r) => {
+          if (!r.properties.payload) return false;
+          try {
+            const p = JSON.parse(r.properties.payload) as Record<string, unknown>;
+            return p.phase === filter.phase;
+          } catch { return false; }
+        });
+      }
+    }
+
+    // Sort: timestamp ASC, id ASC (matches LocalAdapter order)
+    results.sort((a, b) => {
+      const tA = a.properties.timestamp ?? "";
+      const tB = b.properties.timestamp ?? "";
+      if (tA < tB) return -1;
+      if (tA > tB) return 1;
+      return a.node.id.localeCompare(b.node.id);
+    });
+
+    return results;
+  }
+
   async nextId(type: NodeType, cycle?: number): Promise<string> {
     const data = await this.client.query<{ nextId: string }>(
       `query NextId($type: NodeType!, $cycle: Int) {
@@ -1361,5 +1492,19 @@ export class RemoteAdapter implements StorageAdapter {
     }
 
     return data.appendJournal.id;
+  }
+
+  // -------------------------------------------------------------------------
+  // Index maintenance — no-ops for RemoteAdapter
+  // The remote backend maintains its own index server-side; watcher-triggered
+  // incremental indexing is not applicable here.
+  // -------------------------------------------------------------------------
+
+  async indexFiles(_paths: string[]): Promise<void> {
+    // no-op: remote index is maintained server-side
+  }
+
+  async removeFiles(_paths: string[]): Promise<void> {
+    // no-op: remote index is maintained server-side
   }
 }

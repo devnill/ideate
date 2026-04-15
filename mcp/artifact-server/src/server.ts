@@ -23,7 +23,7 @@ import { signalIndexReady } from "./tools/index.js";
 import { artifactWatcher, BatchChangeEvent } from "./watcher.js";
 import { createIdeateDir, CONFIG_SCHEMA_VERSION, IDEATE_SUBDIRS, IdeateConfigJson, resolveArtifactDir, readIdeateConfig, readRawConfig } from "./config.js";
 import { createSchema, checkSchemaVersion } from "./schema.js";
-import { rebuildIndex, indexFiles, removeFiles, RebuildStats } from "./indexer.js";
+import { rebuildIndex, RebuildStats } from "./indexer.js";
 import { runPendingMigrations } from "./migrations.js";
 import * as dbSchema from "./db.js";
 import { log } from "./logger.js";
@@ -157,15 +157,15 @@ export function initServer(dir: string, state: ServerState): void {
     watchedDirs.add(dir);
     artifactWatcher.on("change", (event: BatchChangeEvent) => {
       try {
-        if (!state.ctx) return;
+        if (!state.ctx || !state.ctx.adapter) return;
         if (event.artifactDir !== dir) return;
         const yamlChanged = event.changed.filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
         const yamlDeleted = event.deleted.filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
         if (yamlChanged.length > 0) {
-          indexFiles(state.ctx.db, state.ctx.drizzleDb, yamlChanged);
+          void state.ctx.adapter.indexFiles(yamlChanged);
         }
         if (yamlDeleted.length > 0) {
-          removeFiles(state.ctx.db, state.ctx.drizzleDb, yamlDeleted);
+          void state.ctx.adapter.removeFiles(yamlDeleted);
         }
       } catch (err) {
         log.error("watcher", "incremental index failed", err);

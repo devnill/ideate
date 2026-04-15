@@ -16,6 +16,16 @@ The `StorageAdapter` interface provides a consistent API for graph operations re
 2. **Adapter Equivalence**: LocalAdapter and RemoteAdapter must behave identically from the caller's perspective
 3. **Validation-First**: All inputs are validated before operations; validation errors use standardized codes
 
+## Implementation Constraints
+
+The following invariants apply to all MCP tool handlers (files under `tools/`). They were established by RF-clean-interface-proposal §1 and enforced by WI-804.
+
+1. **No concrete adapter imports in tool handlers.** Tool handler files must not import `LocalAdapter`, `RemoteAdapter`, or any storage implementation class directly. The only permitted import is the `StorageAdapter` interface (and its associated types) from `adapter.ts`. Handler code accesses storage exclusively through `ctx.adapter`.
+
+2. **No `ctx.db` / `ctx.drizzleDb` access in tool handlers.** Tool handlers must not read or write `ToolContext.db` (the raw better-sqlite3 handle) or `ToolContext.drizzleDb` (the Drizzle ORM wrapper). Both fields are removed from `ToolContext` in the target architecture (see `architecture-overview.md` §6.2). Any remaining access to these fields in a handler is a violation of this constraint and must be migrated to an adapter method.
+
+---
+
 ## Interface Methods
 
 ### Node CRUD Operations

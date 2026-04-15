@@ -24,6 +24,7 @@ import {
   ALL_EDGE_TYPES,
   ValidationError,
   ImmutableFieldError,
+  MetricsEventRow,
 } from "./adapter.js";
 import type { EdgeType } from "./schema.js";
 
@@ -450,6 +451,36 @@ export class ValidatingAdapter implements StorageAdapter {
   ): Promise<QueryResult> {
     this.validatePagination(limit, offset);
     return this.inner.queryNodes(filter, limit, offset);
+  }
+
+  async getMetricsEvents(filter?: NodeFilter): Promise<MetricsEventRow[]> {
+    // No input validation needed — all filter fields are optional and
+    // validated by the inner adapter's TypeScript-side filtering logic.
+    return this.inner.getMetricsEvents(filter);
+  }
+
+  async indexFiles(paths: string[]): Promise<void> {
+    // paths: must be an array
+    if (!Array.isArray(paths)) {
+      throw new ValidationError(
+        "paths must be an array",
+        "INVALID_PATHS",
+        { value: paths }
+      );
+    }
+    return this.inner.indexFiles(paths);
+  }
+
+  async removeFiles(paths: string[]): Promise<void> {
+    // paths: must be an array
+    if (!Array.isArray(paths)) {
+      throw new ValidationError(
+        "paths must be an array",
+        "INVALID_PATHS",
+        { value: paths }
+      );
+    }
+    return this.inner.removeFiles(paths);
   }
 
   async nextId(type: NodeType, cycle?: number): Promise<string> {
