@@ -54,7 +54,9 @@ type NodeType =
   | "constraints"
   | "research"
   | "interview"
-  | "domain_index";
+  | "domain_index"
+  // Session/state artifacts
+  | "autopilot_state";
 
 /** Metadata common to every node. */
 interface NodeMeta {
@@ -442,10 +444,18 @@ interface StorageAdapter {
    *   items, 4 incremental reviews moved."). Callers surface this string to
    *   the user rather than constructing their own message.
    *
-   * @throws {NotFoundError} if the cycle number does not exist (i.e. was never
-   *   created). Calling archiveCycle on a cycle that exists but has already
-   *   been archived is a no-op — it does not throw.
-   * @throws {StorageAdapterError} if the cycle has no artifacts to archive.
+   *   **LocalAdapter**: archival-logic errors are returned as a string
+   *   beginning with "Error during cycle archival" — the method never throws
+   *   for archival failures. Callers must inspect the return value.
+   *
+   *   **RemoteAdapter**: archival-logic errors from the server are returned
+   *   in the successful GraphQL response and surfaced as the return string.
+   *   However, transport-layer failures (network, HTTP error, auth failure,
+   *   malformed response) propagate as thrown `ConnectionError` or
+   *   `StorageAdapterError` because `client.mutate` has no try/catch.
+   *
+   *   A cycle that has already been archived returns a
+   *   "0 work items, 0 incremental reviews moved" message (no error).
    */
   archiveCycle(cycle: number): Promise<string>;
 
@@ -537,10 +547,10 @@ interface StorageAdapter {
 
 | Aspect | Behavior |
 |---|---|
-| Precondition | The cycle number must exist and have at least one artifact associated with it. If either condition is not met, the adapter throws. A cycle that has already been archived is treated as a no-op (no error); a cycle that was never created throws `NotFoundError`. |
+| Precondition | The cycle number must exist and have at least one artifact associated with it. **LocalAdapter**: if either condition is not met, returns an error string beginning with `"Error during cycle archival"` — it does not throw. **RemoteAdapter**: the server enforces preconditions and returns the outcome as the GraphQL response string; transport failures (network, HTTP, auth) cause `client.mutate` to throw `ConnectionError` or `StorageAdapterError`. A cycle that has already been archived is treated as a no-op in both adapters; it returns a "0 work items, 0 incremental reviews moved" message. |
 | LocalAdapter | Transitions artifacts to archived state under the cycle's directory. Updates each node's location entry in the index to reflect its new location. Deletes stale index entries for any artifacts that no longer exist at their original location after the transition. |
 | RemoteAdapter | Calls the `archiveCycle` GraphQL mutation, transitioning artifact statuses from `active` to `archived` for the given cycle. |
-| Atomicity | LocalAdapter performs all transitions and index updates atomically — on failure, any transitions already completed are rolled back before the error is thrown. RemoteAdapter relies on server-side transaction semantics. |
+| Atomicity | **LocalAdapter**: performs all transitions and index updates atomically — on failure, any transitions already completed are rolled back and the method returns an error string beginning with `"Error during cycle archival"` rather than throwing. **RemoteAdapter**: relies on server-side transaction semantics; the server's archival result (success or error string) is returned in the GraphQL response. Transport-layer failures cause `client.mutate` to throw rather than return a string. |
 | Idempotency | Calling `archiveCycle` on a cycle that has already been archived is a no-op (no error). |
 | Return value | Returns a human-readable summary string (e.g. `"Archived cycle 3: 2 work items, 4 incremental reviews moved."`). On an already-archived cycle, returns a `"0 work items, 0 incremental reviews moved"` message. |
 
@@ -658,7 +668,7 @@ class MissingCycleError extends StorageAdapterError {
 | `getConvergenceData` | Never | -- |
 | `initialize` | `ConnectionError`, `StorageAdapterError` | -- |
 | `shutdown` | Never (best-effort) | -- |
-| `archiveCycle` | `NotFoundError` (cycle not found), `StorageAdapterError` (no artifacts / I/O) | -- |
+| `archiveCycle` | **LocalAdapter**: never — returns error string beginning with `"Error during cycle archival"`. **RemoteAdapter**: `ConnectionError` or `StorageAdapterError` on transport/HTTP/auth failure; archival-logic errors from the server are returned as the response string, not thrown. | -- |
 | `appendJournalEntry` | `StorageAdapterError` (I/O) | -- |
 
 ---

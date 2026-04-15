@@ -418,7 +418,7 @@ The helper sub-functions `runFilterMode`, `runGraphMode`, and `buildSummaryMap` 
 |---|---|---|
 | `db-helpers.ts` | LocalAdapter internal | All upsert/query helpers are storage implementation |
 | `indexer.ts` | LocalAdapter internal | YAML-to-SQLite indexing is local storage concern |
-| `ppr.ts` | LocalAdapter internal | PPR is the local implementation of `traverse()` |
+| `ppr.ts` | LocalAdapter internal | Provides `computePPR`; called by `LocalContextAdapter.traverse()` in adapters/local/context.ts |
 | `schema.ts` (createSchema) | LocalAdapter internal | SQLite schema is local storage concern |
 | `watcher.ts` | LocalAdapter internal | File watching is local storage concern |
 
@@ -551,7 +551,7 @@ Recommended work item decomposition:
 **WI-551: Create StorageAdapter interface and LocalAdapter scaffold**
 - Create `src/adapter.ts` with the interface
 - Create `src/local-adapter.ts` with stub implementations
-- Wire `createAdapter` into server.ts initialization
+- Wire `selectAdapter` into server.ts initialization
 - All stubs delegate to existing code paths (no behavior change)
 
 **WI-552: Extract write operations behind LocalAdapter**
@@ -587,7 +587,7 @@ Recommended work item decomposition:
 - Bump schema_version to 4
 - Add migration in migrations.ts
 - Add backend/remote fields to IdeateConfigJson
-- Wire config into adapter factory (createAdapter)
+- Wire config into adapter factory (selectAdapter)
 
 ### 5.4 Extraction Strategy
 
@@ -622,12 +622,15 @@ Each extraction step must satisfy:
 ### 6.1 Current ToolContext
 
 ```typescript
-interface ToolContext {
-  db: Database.Database;        // raw better-sqlite3 handle
-  drizzleDb: DrizzleDb;         // Drizzle ORM wrapper
+export interface ToolContext {
+  db?: Database.Database;       // raw better-sqlite3 handle (optional; absent in remote mode)
+  drizzleDb?: DrizzleDb;        // Drizzle ORM wrapper (optional; absent in remote mode)
   ideateDir: string;            // path to .ideate/ directory
+  adapter?: StorageAdapter;     // storage adapter (optional during migration)
 }
 ```
+
+All three storage-access fields (`db`, `drizzleDb`, `adapter`) are optional. In local mode, `initServer` populates `db`, `drizzleDb`, and `adapter`. In remote mode, only `adapter` is set; `db` and `drizzleDb` are absent. `ideateDir` is always required.
 
 ### 6.2 Target ToolContext
 
@@ -638,7 +641,7 @@ interface ToolContext {
 }
 ```
 
-The `db` and `drizzleDb` fields are removed from ToolContext. They become internal state of the LocalAdapter. Tool handlers never touch SQLite directly.
+Once the adapter extraction is complete, `db` and `drizzleDb` will be removed from ToolContext. They become internal state of the LocalAdapter. Tool handlers never touch SQLite directly.
 
 The `ideateDir` field is retained because some tool handlers use it for non-storage purposes (e.g., deriving the project source root for the source code index in handleGetContextPackage). In remote mode, `ideateDir` would still point to a local directory for source code scanning, even though artifact storage is remote.
 
@@ -652,4 +655,4 @@ The `ideateDir` field is retained because some tool handlers use it for non-stor
 
 3. **Source code index**: handleGetContextPackage scans the filesystem for source files. This is not artifact storage — it is project context. Should the adapter own source code scanning, or should it remain a handler concern?
 
-4. **File watcher**: The current watcher.ts detects YAML changes and triggers incremental re-indexing. In remote mode, there is no local YAML to watch. The watcher is purely a LocalAdapter concern. Confirmed: it moves behind the adapter.
+4. **File watcher**: The current watcher.ts exports `ArtifactWatcher` (class) and the singleton `artifactWatcher`. The watcher emits `"change"` events carrying a `BatchChangeEvent` (fields: `artifactDir`, `changed`, `deleted`). server.ts listens to these events and calls `adapter.indexFiles(yamlChanged)` and `adapter.removeFiles(yamlDeleted)` to trigger incremental re-indexing. The watcher itself does not touch the index directly. In remote mode, there is no local YAML to watch; the watcher is purely a LocalAdapter concern. Confirmed: it moves behind the adapter.

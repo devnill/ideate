@@ -1080,20 +1080,22 @@ export class LocalReaderAdapter {
       )
       .all(cycle, likePattern, likePattern) as RawRow[];
 
-    // Prefer canonical filenames (fix: option c — ignore legacy ID-named files when
-    // canonical spec-adherence.yaml is present, preventing false negatives from
-    // stale legacy SA-NNN files in the same cycle directory).
-    const adherenceRow =
-      summaryRows.find((r) => r.file_path.endsWith("/spec-adherence.yaml")) ??
-      summaryRows.find((r) => r.id.toUpperCase().startsWith("SA-")) ??
-      summaryRows.find((r) => r.id.toLowerCase().includes("adherence"));
-    const summaryRow =
-      summaryRows.find((r) => r.file_path.endsWith("/summary.yaml")) ??
-      summaryRows.find(
-        (r) =>
-          r.id.toUpperCase().startsWith("CS-") ||
-          r.id.toLowerCase().includes("summary")
-      ) ?? summaryRows[0];
+    // Fix option (c) — strict canonical-only selection (WI-824).
+    // Only rows whose file_path ends with a canonical filename are considered.
+    // Legacy ID-named files (SA-NNN, CQ-NNN, GA-NNN) are invisible to this
+    // selector regardless of whether their document_artifacts row has content
+    // (rebuildIndex populates da.cycle from the YAML's embedded cycle: field,
+    // so a da_content-present test is not a safe provenance guard). Canonical
+    // writes always generate spec-adherence.yaml / summary.yaml on disk via
+    // resolveArtifactPath, so those filenames are the reliable signal.
+    // If no canonical row is found, cycle_summary_content returns null and
+    // the caller treats the cycle as having no convergence data.
+    const adherenceRow = summaryRows.find((r) =>
+      r.file_path.endsWith("/spec-adherence.yaml")
+    );
+    const summaryRow = summaryRows.find((r) =>
+      r.file_path.endsWith("/summary.yaml")
+    );
 
     const targetRow = adherenceRow ?? summaryRow;
     let cycle_summary_content: string | null = null;

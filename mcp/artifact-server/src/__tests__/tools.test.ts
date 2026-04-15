@@ -728,11 +728,21 @@ describe("handleGetConvergenceStatus", () => {
   }
 
   it("happy path: converged=true when no critical/significant findings and principle passes", async () => {
-    insertCycleSummary(
-      "CS-001",
-      1,
-      "**Principle Violation Verdict**: Pass\n\n## Summary\nAll good.\n"
+    // WI-824 (fix option c): canonical id required — insertCycleSummary uses
+    // file_path /tmp/{id}.yaml which is not canonical; switch to a canonical
+    // node whose file_path ends with spec-adherence.yaml.
+    const cycleDir = path.join(artifactDir, "cycles", "001");
+    fs.mkdirSync(cycleDir, { recursive: true });
+    const filePath = path.join(cycleDir, "spec-adherence.yaml");
+    fs.writeFileSync(
+      filePath,
+      "id: spec-adherence-001\ntype: cycle_summary\ncycle: 1\n",
+      "utf8"
     );
+    insertNode("spec-adherence-001", "cycle_summary", { file_path: filePath, cycle_created: 1 });
+    db.prepare(
+      `INSERT OR REPLACE INTO document_artifacts (id, cycle, content) VALUES (?, ?, ?)`
+    ).run("spec-adherence-001", 1, "**Principle Violation Verdict**: Pass\n\n## Summary\nAll good.\n");
 
     const result = await handleGetConvergenceStatus(ctx, {
       cycle_number: 1,
@@ -744,11 +754,19 @@ describe("handleGetConvergenceStatus", () => {
   });
 
   it("happy path: converged=false when critical findings exist", async () => {
-    insertCycleSummary(
-      "CS-001",
-      1,
-      "**Principle Violation Verdict**: Pass\n\n## Summary\nAll good.\n"
+    // WI-824 (fix option c): canonical id required (same pattern as above).
+    const cycleDir = path.join(artifactDir, "cycles", "001");
+    fs.mkdirSync(cycleDir, { recursive: true });
+    const filePath = path.join(cycleDir, "spec-adherence.yaml");
+    fs.writeFileSync(
+      filePath,
+      "id: spec-adherence-001\ntype: cycle_summary\ncycle: 1\n",
+      "utf8"
     );
+    insertNode("spec-adherence-001", "cycle_summary", { file_path: filePath, cycle_created: 1 });
+    db.prepare(
+      `INSERT OR REPLACE INTO document_artifacts (id, cycle, content) VALUES (?, ?, ?)`
+    ).run("spec-adherence-001", 1, "**Principle Violation Verdict**: Pass\n\n## Summary\nAll good.\n");
     // Insert 2 critical findings for cycle 1 into the findings table
     insertFinding("F-001-001", "critical", "WI-001", "fail", 1);
     insertFinding("F-001-002", "critical", "WI-001", "fail", 1);
@@ -779,11 +797,20 @@ describe("handleGetConvergenceStatus", () => {
   });
 
   it("Test B: no findings for cycle 100 with Pass verdict → converged=true, condition_a=true, condition_b=true", async () => {
-    insertCycleSummary(
-      "CS-100",
-      100,
-      "**Principle Violation Verdict**: Pass\n\n## Summary\nAll good.\n"
+    // WI-824 (fix option c): canonical id required — node file_path must end with
+    // spec-adherence.yaml so adherenceRow selection finds it.
+    const cycleDir = path.join(artifactDir, "cycles", "100");
+    fs.mkdirSync(cycleDir, { recursive: true });
+    const filePath = path.join(cycleDir, "spec-adherence.yaml");
+    fs.writeFileSync(
+      filePath,
+      "id: spec-adherence-100\ntype: cycle_summary\ncycle: 100\n",
+      "utf8"
     );
+    insertNode("spec-adherence-100", "cycle_summary", { file_path: filePath, cycle_created: 100 });
+    db.prepare(
+      `INSERT OR REPLACE INTO document_artifacts (id, cycle, content) VALUES (?, ?, ?)`
+    ).run("spec-adherence-100", 100, "**Principle Violation Verdict**: Pass\n\n## Summary\nAll good.\n");
     // No findings inserted for cycle 100
 
     const result = await handleGetConvergenceStatus(ctx, {
@@ -831,19 +858,21 @@ describe("handleGetConvergenceStatus", () => {
     );
   });
 
-  it("file_path fallback: finds cycle_summary when document_artifacts row is absent", async () => {
-    // Write a cycle_summary YAML file on disk under cycles/097/ (matching the LIKE pattern)
+  it("file_path fallback: finds cycle_summary when document_artifacts row is absent (canonical filename)", async () => {
+    // Write a cycle_summary YAML file on disk under cycles/097/ using canonical filename.
+    // WI-824 (fix option c): only canonical filenames (spec-adherence.yaml) are accepted
+    // for file-path fallback reads; legacy SA-NNN filenames are no longer found.
     const cycleDir = path.join(artifactDir, "cycles", "097");
     fs.mkdirSync(cycleDir, { recursive: true });
-    const filePath = path.join(cycleDir, "SA-097.yaml");
+    const filePath = path.join(cycleDir, "spec-adherence.yaml");
     fs.writeFileSync(
       filePath,
-      "id: SA-097\ntype: cycle_summary\ncycle: 97\ncontent: |-\n  ## Verdict: Pass\n  **Principle Violation Verdict**: Pass\n",
+      "id: spec-adherence-097\ntype: cycle_summary\ncycle: 97\ncontent: |-\n  ## Verdict: Pass\n  **Principle Violation Verdict**: Pass\n",
       "utf8"
     );
 
     // Insert only a nodes row — intentionally NO document_artifacts row
-    insertNode("SA-097", "cycle_summary", { file_path: filePath, cycle_created: 97 });
+    insertNode("spec-adherence-097", "cycle_summary", { file_path: filePath, cycle_created: 97 });
 
     const result = await handleGetConvergenceStatus(ctx, { cycle_number: 97 });
     expect(result).toContain("converged: true");
@@ -851,22 +880,24 @@ describe("handleGetConvergenceStatus", () => {
     expect(result).toContain("principle_verdict: pass");
   });
 
-  it("file_path fallback: finds cycle_summary when document_artifacts row exists but da.cycle is null", async () => {
-    // Simulate the case where a node IS in document_artifacts but da.cycle was not populated
+  it("file_path fallback: finds cycle_summary when document_artifacts row exists but da.cycle is null (canonical filename)", async () => {
+    // Simulate the case where a node IS in document_artifacts but da.cycle was not populated.
+    // WI-824 (fix option c): only canonical filenames (spec-adherence.yaml) are accepted
+    // for file-path fallback reads; legacy SA-NNN filenames are no longer found.
     const cycleDir = path.join(artifactDir, "cycles", "098");
     fs.mkdirSync(cycleDir, { recursive: true });
-    const filePath = path.join(cycleDir, "SA-098.yaml");
+    const filePath = path.join(cycleDir, "spec-adherence.yaml");
     fs.writeFileSync(
       filePath,
-      "id: SA-098\ntype: cycle_summary\ncycle: 98\ncontent: |-\n  ## Verdict: Pass\n  **Principle Violation Verdict**: Pass\n",
+      "id: spec-adherence-098\ntype: cycle_summary\ncycle: 98\ncontent: |-\n  ## Verdict: Pass\n  **Principle Violation Verdict**: Pass\n",
       "utf8"
     );
 
     // Insert nodes row and a document_artifacts row with NULL cycle
-    insertNode("SA-098", "cycle_summary", { file_path: filePath, cycle_created: 98 });
+    insertNode("spec-adherence-098", "cycle_summary", { file_path: filePath, cycle_created: 98 });
     db.prepare(
       `INSERT OR REPLACE INTO document_artifacts (id, cycle, content) VALUES (?, NULL, NULL)`
-    ).run("SA-098");
+    ).run("spec-adherence-098");
 
     const result = await handleGetConvergenceStatus(ctx, { cycle_number: 98 });
     expect(result).toContain("converged: true");
@@ -877,9 +908,11 @@ describe("handleGetConvergenceStatus", () => {
   it("write→convergence roundtrip: handleWriteArtifact then handleGetConvergenceStatus returns converged:true", async () => {
     // Full roundtrip: write a cycle_summary via handleWriteArtifact (writes YAML + SQLite),
     // then query convergence — exercises the complete write→index→query chain.
+    // WI-824 (fix option c): canonical id "spec-adherence" generates spec-adherence.yaml on disk;
+    // legacy SA-NNN ids are no longer found by the strict canonical-only file selection.
     await handleWriteArtifact(ctx, {
       type: "cycle_summary",
-      id: "SA-roundtrip-001",
+      id: "spec-adherence",
       cycle: 8,
       content: {
         title: "SA roundtrip test",
@@ -888,7 +921,7 @@ describe("handleGetConvergenceStatus", () => {
     });
 
     // No critical/significant findings for cycle 8 → condition_a: true
-    // SA-roundtrip-001 has Principle Violation Verdict: Pass → condition_b: true
+    // spec-adherence artifact has Principle Violation Verdict: Pass → condition_b: true
     const result = await handleGetConvergenceStatus(ctx, { cycle_number: 8 });
     expect(result).toContain("converged: true");
     expect(result).toContain("condition_a: true");
@@ -897,13 +930,18 @@ describe("handleGetConvergenceStatus", () => {
   });
 
   it("parsePrincipleVerdict: returns pass when da_content is JSON.stringify({content: '**Principle Violation Verdict**: Pass'})", async () => {
-    // Simulate how handleWriteArtifact stores content: JSON.stringify(content object)
-    // resolveContent must unwrap .content before passing to parsePrincipleVerdict
+    // Simulate how handleWriteArtifact stores content: JSON.stringify(content object).
+    // WI-824 (fix option c): node file_path must end with spec-adherence.yaml so
+    // adherenceRow selection finds it; da_content matching alone is no longer sufficient.
     const jsonEncoded = JSON.stringify({ content: "**Principle Violation Verdict**: Pass\n\n## Summary\nAll good." });
-    insertNode("CS-json-001", "cycle_summary", { cycle_created: 9 });
+    const cycleDir = path.join(artifactDir, "cycles", "009");
+    fs.mkdirSync(cycleDir, { recursive: true });
+    const filePath = path.join(cycleDir, "spec-adherence.yaml");
+    fs.writeFileSync(filePath, "id: spec-adherence-009\ntype: cycle_summary\ncycle: 9\n", "utf8");
+    insertNode("spec-adherence-009", "cycle_summary", { file_path: filePath, cycle_created: 9 });
     db.prepare(
       `INSERT OR REPLACE INTO document_artifacts (id, cycle, content) VALUES (?, ?, ?)`
-    ).run("CS-json-001", 9, jsonEncoded);
+    ).run("spec-adherence-009", 9, jsonEncoded);
 
     // No findings for cycle 9 → condition_a: true
     const result = await handleGetConvergenceStatus(ctx, { cycle_number: 9 });
@@ -976,6 +1014,64 @@ describe("handleGetConvergenceStatus", () => {
     expect(result).toContain("condition_b: true");
     expect(result).toContain("principle_verdict: pass");
     expect(result).toContain("converged: true");
+  });
+
+  it("regression WI-824 (strict canonical-only): legacy SA-NNN.yaml (Fail) with NO canonical file yields null cycle_summary_content — condition_b not falsely set", async () => {
+    // Reproducer: a reused cycle slot has ONLY a legacy SA-NNN.yaml (from a prior
+    // archive) and no canonical spec-adherence.yaml. Before fix option (c), the
+    // legacy file was returned as a fallback, causing condition_b:false even when
+    // the current cycle genuinely has no convergence data. After fix option (c),
+    // canonical-only selection treats the absence of spec-adherence.yaml as null
+    // (no data), so handleGetConvergenceStatus does not misread the legacy verdict.
+    const cycleDir = path.join(artifactDir, "cycles", "202");
+    fs.mkdirSync(cycleDir, { recursive: true });
+
+    // Legacy SA-202.yaml with Fail verdict — on disk only (file_path fallback path)
+    // No canonical spec-adherence.yaml exists in this cycle directory.
+    const legacyPath = path.join(cycleDir, "SA-202.yaml");
+    fs.writeFileSync(
+      legacyPath,
+      "id: SA-202\ntype: cycle_summary\ncycle: 202\ncontent: |-\n  ## Verdict: Fail\n\n  Stale artifact from a prior archive.\n",
+      "utf8"
+    );
+    insertNode("SA-202", "cycle_summary", { file_path: legacyPath, cycle_created: 202 });
+
+    // Attach LocalAdapter — routes handleGetConvergenceStatus through reader.ts:getConvergenceData
+    ctx.adapter = new LocalAdapter({ db, drizzleDb: ctx.drizzleDb!, ideateDir: artifactDir });
+
+    // With strict canonical-only, getConvergenceData returns cycle_summary_content: null.
+    // condition_b is therefore "unknown" / not driven by the stale legacy file.
+    const data = await ctx.adapter.getConvergenceData(202);
+    expect(data.cycle_summary_content).toBeNull();
+  });
+
+  it("regression WI-824 (reindex-leak): legacy SA-NNN with da_content populated by reindex yields null — da_content alone is not a provenance guard", async () => {
+    // Reproducer: after rebuildIndex/indexFiles processes a legacy SA-NNN.yaml that
+    // has an embedded `cycle:` field, the indexer populates document_artifacts with
+    // da.cycle = N and da_content from the file. The dbContentRow fallback (now
+    // removed) would have matched this row, re-leaking the stale verdict. This test
+    // asserts that even with a document_artifacts row present and da_content non-null
+    // for a legacy-named node, canonical-only selection still returns null.
+    const cycleDir = path.join(artifactDir, "cycles", "203");
+    fs.mkdirSync(cycleDir, { recursive: true });
+
+    // Legacy SA-203.yaml — simulates a file reindexed from a prior archive.
+    const legacyPath = path.join(cycleDir, "SA-203.yaml");
+    fs.writeFileSync(
+      legacyPath,
+      "id: SA-203\ntype: cycle_summary\ncycle: 203\ncontent: |-\n  ## Verdict: Fail\n\n  Stale from prior archive, reindexed.\n",
+      "utf8"
+    );
+    insertNode("SA-203", "cycle_summary", { file_path: legacyPath, cycle_created: 203 });
+    // Simulate what rebuildIndex does: populate document_artifacts with da.cycle + da_content
+    db.prepare(
+      `INSERT OR REPLACE INTO document_artifacts (id, cycle, content) VALUES (?, ?, ?)`
+    ).run("SA-203", 203, "## Verdict: Fail\n\n  Stale from prior archive, reindexed.\n");
+
+    // No canonical spec-adherence.yaml exists — cycle_summary_content must be null.
+    ctx.adapter = new LocalAdapter({ db, drizzleDb: ctx.drizzleDb!, ideateDir: artifactDir });
+    const data = await ctx.adapter.getConvergenceData(203);
+    expect(data.cycle_summary_content).toBeNull();
   });
 });
 
@@ -3537,10 +3633,12 @@ describe("handleWriteArtifact — interview_question dispatch branch", () => {
 
 describe("write-to-convergence roundtrip", () => {
   it("Pass verdict: writing cycle_summary with Pass verdict yields condition_b=true and principle_verdict=pass", async () => {
-    // Write a spec-adherence cycle_summary with a Pass verdict via handleWriteArtifact
+    // Write a spec-adherence cycle_summary with a Pass verdict via handleWriteArtifact.
+    // WI-824: canonical id "spec-adherence" is required — legacy SA-NNN ids are no longer
+    // visible to getConvergenceData under strict canonical-only selection (fix option c).
     await handleWriteArtifact(ctx, {
       type: "cycle_summary",
-      id: "SA-001",
+      id: "spec-adherence",
       cycle: 1,
       content: {
         title: "Spec adherence cycle 1",
@@ -3558,10 +3656,12 @@ describe("write-to-convergence roundtrip", () => {
   });
 
   it("Fail verdict: writing cycle_summary with Fail verdict yields condition_b=false and principle_verdict=fail", async () => {
-    // Write a spec-adherence cycle_summary with a Fail verdict via handleWriteArtifact
+    // Write a spec-adherence cycle_summary with a Fail verdict via handleWriteArtifact.
+    // WI-824: canonical id "spec-adherence" is required — legacy SA-NNN ids are no longer
+    // visible to getConvergenceData under strict canonical-only selection (fix option c).
     await handleWriteArtifact(ctx, {
       type: "cycle_summary",
-      id: "SA-002",
+      id: "spec-adherence",
       cycle: 2,
       content: {
         title: "Spec adherence cycle 2",

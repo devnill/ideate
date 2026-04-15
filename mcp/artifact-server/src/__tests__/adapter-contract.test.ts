@@ -1392,6 +1392,207 @@ export function runAdapterContractTests(
     });
 
     // -----------------------------------------------------------------------
+    // getMetricsEvents (contract) — WI-827
+    //
+    // Covers the four required filter combinations:
+    //   1. Empty store → []
+    //   2. cycle filter
+    //   3. agent_type filter
+    //   4. Combined (cycle + agent_type) AND semantics
+    //
+    // These tests run against BOTH LocalAdapter and RemoteAdapter through this
+    // shared factory, which automatically exercises the RemoteAdapter's
+    // TypeScript-side cycle filtering (D-210 two-round-trip path).
+    //
+    // Write path: putNode with type "metrics_event" stores agent_type inside
+    // the payload JSON field. cycle_created is set via MutateNodeInput.cycle.
+    // -----------------------------------------------------------------------
+
+    describe("getMetricsEvents (contract)", () => {
+      // Helper: write a metrics event node via the adapter's putNode.
+      // - id: unique node ID (e.g. "ME-CT-01")
+      // - cycle: cycle_created value; passed both as MutateNodeInput.cycle
+      //   and as properties.cycle_created so the LocalAdapter writer stores it
+      //   correctly regardless of CYCLE_SCOPED_TYPES membership.
+      // - agentType: stored in payload.agent_type via the writer
+      // - timestamp: ISO timestamp string for ordering assertions
+      async function writeMetricsEvent(
+        a: StorageAdapter,
+        opts: {
+          id: string;
+          cycle: number;
+          agentType?: string;
+          eventName?: string;
+          timestamp?: string;
+        }
+      ): Promise<void> {
+        const props: Record<string, unknown> = {
+          event_name: opts.eventName ?? "test_event",
+          timestamp: opts.timestamp ?? "2026-01-01T00:00:00.000Z",
+          cycle_created: opts.cycle,
+        };
+        if (opts.agentType !== undefined) {
+          props.agent_type = opts.agentType;
+        }
+        await a.putNode({
+          id: opts.id,
+          type: "metrics_event",
+          cycle: opts.cycle,
+          properties: props,
+        });
+      }
+
+      // 1. Empty result — getMetricsEvents on empty store returns []
+      it("returns [] (not null, not undefined) when no metrics events exist", async () => {
+        const results = await adapter.getMetricsEvents();
+        expect(Array.isArray(results)).toBe(true);
+        expect(results).toHaveLength(0);
+      });
+
+      // 2. Cycle filter — write events across cycles 1, 2, 3; filter by cycle=2
+      it("cycle filter returns only events from the specified cycle", async () => {
+        await writeMetricsEvent(adapter, {
+          id: "ME-CT-C01",
+          cycle: 1,
+          agentType: "code-reviewer",
+          timestamp: "2026-01-01T00:01:00.000Z",
+        });
+        await writeMetricsEvent(adapter, {
+          id: "ME-CT-C02",
+          cycle: 2,
+          agentType: "architect",
+          timestamp: "2026-01-01T00:02:00.000Z",
+        });
+        await writeMetricsEvent(adapter, {
+          id: "ME-CT-C03",
+          cycle: 3,
+          agentType: "domain-curator",
+          timestamp: "2026-01-01T00:03:00.000Z",
+        });
+
+        const results = await adapter.getMetricsEvents({ cycle: 2 });
+
+        expect(Array.isArray(results)).toBe(true);
+        expect(results).toHaveLength(1);
+        expect(results[0].node.id).toBe("ME-CT-C02");
+        expect(results[0].node.cycle_created).toBe(2);
+        expect(results[0].node.type).toBe("metrics_event");
+      });
+
+      // 3. agent_type filter — write events with different agent_types
+      it("agent_type filter returns only events with matching payload.agent_type", async () => {
+        await writeMetricsEvent(adapter, {
+          id: "ME-CT-A01",
+          cycle: 1,
+          agentType: "worker-agent",
+          timestamp: "2026-02-01T00:01:00.000Z",
+        });
+        await writeMetricsEvent(adapter, {
+          id: "ME-CT-A02",
+          cycle: 1,
+          agentType: "reviewer-agent",
+          timestamp: "2026-02-01T00:02:00.000Z",
+        });
+        await writeMetricsEvent(adapter, {
+          id: "ME-CT-A03",
+          cycle: 2,
+          agentType: "worker-agent",
+          timestamp: "2026-02-01T00:03:00.000Z",
+        });
+
+        const results = await adapter.getMetricsEvents({ agent_type: "worker-agent" });
+
+        expect(Array.isArray(results)).toBe(true);
+        const ids = results.map((r) => r.node.id).sort();
+        expect(ids).toContain("ME-CT-A01");
+        expect(ids).toContain("ME-CT-A03");
+        expect(ids).not.toContain("ME-CT-A02");
+
+        // Verify payload carries agent_type
+        for (const row of results.filter((r) => ["ME-CT-A01", "ME-CT-A03"].includes(r.node.id))) {
+          expect(row.properties.payload).not.toBeNull();
+          const payload = JSON.parse(row.properties.payload!) as Record<string, unknown>;
+          expect(payload.agent_type).toBe("worker-agent");
+        }
+      });
+
+      // 4. Combined filters — cycle + agent_type compose AND semantics
+      it("combined cycle + agent_type filters apply AND semantics", async () => {
+        await writeMetricsEvent(adapter, {
+          id: "ME-CT-D01",
+          cycle: 5,
+          agentType: "executor",
+          timestamp: "2026-03-01T00:01:00.000Z",
+        });
+        await writeMetricsEvent(adapter, {
+          id: "ME-CT-D02",
+          cycle: 5,
+          agentType: "curator",
+          timestamp: "2026-03-01T00:02:00.000Z",
+        });
+        await writeMetricsEvent(adapter, {
+          id: "ME-CT-D03",
+          cycle: 6,
+          agentType: "executor",
+          timestamp: "2026-03-01T00:03:00.000Z",
+        });
+
+        // Only ME-CT-D01 matches both cycle=5 AND agent_type="executor"
+        const results = await adapter.getMetricsEvents({
+          cycle: 5,
+          agent_type: "executor",
+        });
+
+        expect(Array.isArray(results)).toBe(true);
+        expect(results).toHaveLength(1);
+        expect(results[0].node.id).toBe("ME-CT-D01");
+        expect(results[0].node.cycle_created).toBe(5);
+
+        const payload = JSON.parse(results[0].properties.payload!) as Record<string, unknown>;
+        expect(payload.agent_type).toBe("executor");
+      });
+
+      // Shape contract — returned rows must conform to MetricsEventRow structure
+      it("returned rows have the correct MetricsEventRow shape (node + properties)", async () => {
+        await writeMetricsEvent(adapter, {
+          id: "ME-CT-SH01",
+          cycle: 7,
+          agentType: "shape-tester",
+          timestamp: "2026-04-01T00:01:00.000Z",
+        });
+
+        const results = await adapter.getMetricsEvents({ cycle: 7 });
+
+        expect(results).toHaveLength(1);
+        const row = results[0];
+
+        // node shape
+        expect(typeof row.node.id).toBe("string");
+        expect(row.node.type).toBe("metrics_event");
+        expect(row.node.cycle_created).toBe(7);
+
+        // properties shape — all MetricsEventProperties keys must be present
+        expect(row.properties).toHaveProperty("event_name");
+        expect(row.properties).toHaveProperty("timestamp");
+        expect(row.properties).toHaveProperty("payload");
+        expect(row.properties).toHaveProperty("input_tokens");
+        expect(row.properties).toHaveProperty("output_tokens");
+        expect(row.properties).toHaveProperty("cache_read_tokens");
+        expect(row.properties).toHaveProperty("cache_write_tokens");
+        expect(row.properties).toHaveProperty("outcome");
+        expect(row.properties).toHaveProperty("finding_count");
+        expect(row.properties).toHaveProperty("finding_severities");
+        expect(row.properties).toHaveProperty("first_pass_accepted");
+        expect(row.properties).toHaveProperty("rework_count");
+        expect(row.properties).toHaveProperty("work_item_total_tokens");
+        expect(row.properties).toHaveProperty("cycle_total_tokens");
+        expect(row.properties).toHaveProperty("cycle_total_cost_estimate");
+        expect(row.properties).toHaveProperty("convergence_cycles");
+        expect(row.properties).toHaveProperty("context_artifact_ids");
+      });
+    });
+
+    // -----------------------------------------------------------------------
     // Context assembly: five code paths (WI-785)
     //
     // These tests verify that the five query patterns used by handleGetContextPackage
