@@ -58,11 +58,11 @@ const DEFAULT_MAX_ITERATIONS = 50;
 const DEFAULT_CONVERGENCE_THRESHOLD = 1e-6;
 
 const DEFAULT_EDGE_TYPE_WEIGHTS: Record<string, number> = {
-  DEPENDS_ON: 1.0,
-  GOVERNED_BY: 0.8,
-  INFORMED_BY: 0.6,
-  REFERENCES: 0.4,
-  BLOCKS: 0.3,
+  depends_on: 1.0,
+  governed_by: 0.8,
+  informed_by: 0.6,
+  references: 0.4,
+  blocks: 0.3,
 };
 
 /** Containment edge types excluded from PPR traversal. */
@@ -70,14 +70,6 @@ const CONTAINMENT_EDGE_TYPES = new Set([
   "owns_codebase", "owns_project", "has_phase", "has_work_item",
   "owns_knowledge", "references_codebase",
 ]);
-
-/**
- * Normalize an edge type to UPPER_SNAKE_CASE for weight lookup.
- * Handles snake_case (SQLite), UPPER_SNAKE_CASE (Neo4j), and mixed case.
- */
-function normalizeEdgeType(edgeType: string): string {
-  return edgeType.toUpperCase();
-}
 
 // ---------------------------------------------------------------------------
 // computePPR
@@ -100,12 +92,8 @@ export function computePPR(
   const maxIterations = options?.maxIterations ?? DEFAULT_MAX_ITERATIONS;
   const convergenceThreshold = options?.convergenceThreshold ?? DEFAULT_CONVERGENCE_THRESHOLD;
 
-  // Normalize edge type weight keys to UPPER_SNAKE_CASE for consistent lookup
-  const rawEdgeTypeWeights = options?.edgeTypeWeights ?? DEFAULT_EDGE_TYPE_WEIGHTS;
-  const edgeTypeWeights: Record<string, number> = {};
-  for (const [key, value] of Object.entries(rawEdgeTypeWeights)) {
-    edgeTypeWeights[normalizeEdgeType(key)] = value;
-  }
+  // Edge type weight keys are lower_snake_case (canonical form per schema.ts)
+  const edgeTypeWeights: Record<string, number> = options?.edgeTypeWeights ?? DEFAULT_EDGE_TYPE_WEIGHTS;
 
   // Validate alpha: must be 0 < alpha <= 1
   if (!Number.isFinite(alpha) || alpha <= 0 || alpha > 1) {
@@ -189,9 +177,8 @@ export function computePPR(
     // Skip containment edges (organizational hierarchy)
     if (CONTAINMENT_EDGE_TYPES.has(e.edge_type)) continue;
 
-    // Normalize edge type to UPPER_SNAKE_CASE for weight lookup
-    const normalizedEdgeType = normalizeEdgeType(e.edge_type);
-    const w = edgeTypeWeights[normalizedEdgeType] ?? 1.0;
+    // Look up weight directly — e.edge_type is lower_snake_case per schema.ts
+    const w = edgeTypeWeights[e.edge_type] ?? 1.0;
 
     // Skip edges with zero weight — they contribute nothing to score propagation
     if (w === 0) continue;

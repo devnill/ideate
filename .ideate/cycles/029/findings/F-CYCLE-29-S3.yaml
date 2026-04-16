@@ -1,0 +1,12 @@
+id: F-CYCLE-29-S3
+type: finding
+severity: significant
+source: code-reviewer
+title: 401 without tokenProvider throws retryable ConnectionError
+description: When no tokenProvider is configured and server returns 401, executeOnce throws ConnectionError which is retryable. A 401 is not transient — retrying wastes 7+ seconds. Pre-existing issue (not introduced by PH-046) but related to S1.
+file: mcp/artifact-server/src/adapters/remote/client.ts
+line: 300
+cycle: 29
+cycle_modified: 27
+content_hash: b9dc80c1cbb5f9aa8f0b4633f769f82c765855552a819a7793b6b1c568ae9dff
+token_count: 120

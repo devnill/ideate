@@ -1,78 +1,97 @@
 id: execution-strategy
 type: execution_strategy
-mode: batched_parallel
-max_parallelism: 2
+mode: sequential
+max_parallelism: 3
 worktrees: true
-review_cadence: per_item
+review_cadence: per-item incremental + phase-end capstone
 work_item_groups:
-  - group: 1
+  - name: Doc and policy cleanup
     items:
-      - WI-745
-      - WI-746
-    notes: No dependencies between items. Different files. Run in parallel.
-dependency_graph:
-  WI-785: []
-  WI-786: []
-  WI-787:
-    - WI-785
+      - WI-835
+      - WI-838
+    rationale: Documentation-only changes. No code dependencies. WI-835 closes P-87 verification gap in execute.md; WI-838 closes AUTH_FAILURE documentation gap.
+  - name: Convergence regression coverage
+    items:
+      - WI-836
+    rationale: Test-only change to tools.test.ts. Exercises an existing code path — no code fix expected.
+  - name: GraphQL client error wrapping
+    items:
+      - WI-837
+    rationale: Two small error-handler additions in src/adapters/remote/client.ts (tokenProvider throw path, executeOnceWithAuth fetch wrapping). Includes matching unit tests.
+dependency_graph: All four WIs are independent. WI-838 optionally runs after WI-837 so docs reflect the expanded AUTH_FAILURE trigger surface, but no hard dependency.
 agent_configuration:
-  model: sonnet
-  reviewer_model: sonnet
-content_hash: af7cf83f8ffe6e47936f231e8afe1b5d8d4631b0583a342cfd2b796a9ed8acef
-token_count: 851
-cycle: 23
-parallelism: 2
+  worker_model: sonnet
+  code_reviewer_model: sonnet
+  spec_reviewer_model: sonnet
+  gap_analyst_model: sonnet
+content_hash: ec2ce9f892f9f15287b85dbb85f0bac60ce00de698f34d76b202af154c1074db
+token_count: 1310
+cycle: 27
+parallelism: 1
 worktree: true
 groups:
-  - name: Group 1 — Independent critical fixes
+  - group: 1
+    rationale: "No-dependency starters: independent docs (MF1/MF2), the dead-code deletion (D2), the carryover bug (WI-797), and the test-only fallback removal (Leaks 3/4/8-12). Run in parallel up to max_parallelism."
     items:
-      - WI-785
-      - WI-786
-    notes: WI-785 and WI-786 have no file overlap. Run in parallel with git worktree isolation.
-  - name: Group 2 — Budget enforcement (depends on WI-785)
+      - WI-797
+      - WI-798
+      - WI-800
+      - WI-801
+      - WI-802
+  - group: 2
+    rationale: Edge type case standardization. Depends on WI-798 (CONTAINMENT_EDGE_TYPES removal) to avoid touching ppr.ts in two parallel branches. Single item, no parallelism needed.
     items:
-      - WI-787
-    notes: WI-787 depends on WI-785 because both modify adapter.ts / local/context.ts / remote/index.ts. Run sequentially after WI-785 merges.
+      - WI-799
 note_on_wi749: WI-749 is a spike. If it finds domain_index is a planned-but-unimplemented feature, new work items will be created in the next refinement. It does not block any other item.
 note_on_wi750_wi748_overlap: WI-748 modifies writer.ts function bodies. WI-750 modifies only the module header comment at writer.ts:8-10. These are non-overlapping line ranges and can execute in parallel.
 cycle_modified: 27
-rationale: WI-760, WI-761, and WI-762 all modify schema.test.ts at different sections. Sequential execution avoids merge conflicts on the same file. WI-759 modifies a work item artifact and could run in parallel with WI-760, but the batch is small enough that sequential ordering is simpler.
+rationale: Sequential with no parallelism because (a) scope is small — 4 WIs, low-complexity each; (b) capstone reviews prefer stable HEAD between items; (c) avoids worktree overhead for a cleanup phase.
 agent_config:
-  model: sonnet
-  max_turns: 100
-notes: "Expected shape: 2 parallel items then 1 serial item. Worktree isolation required because all three touch the adapter layer and parallel merges into the same adapter files would collide. Parallelism 2 matches Group 1; Group 2 is single-item so parallelism is moot."
-content: |-
-  # Execution Strategy — PH-042 (Spike)
+  worker: sonnet
+  code-reviewer: sonnet
+  spec-reviewer: sonnet
+  gap-analyst: sonnet
+  domain-curator: opus
+notes: Six WIs total. Group 1 contains five WIs that touch disjoint file scopes (per the per-WI scope declarations) and can run in parallel under worktree isolation, capped at max_parallelism=3 (so one sub-batch). Group 2 holds WI-799 alone because it modifies the same file as WI-798 (mcp/artifact-server/src/context/ppr.ts) and the depends edge enforces sequencing. Capstone review at end of cycle as usual. P-85 (documentation surface enumeration) applies to all WIs — workers must scan for affected docs before declaring complete.
+content: |
+  # Execution Strategy — Cycle 29 Documentation Sync
 
   ## Mode
-  Batched parallel — WI-781, WI-782, WI-783 run concurrently (all read-only investigations with non-overlapping file scope). WI-784 runs after all three complete (depends on their findings).
+
+  **Batched parallel** — all three work items have single-file, non-overlapping scope and no dependencies. Run in a single concurrent batch.
 
   ## Parallelism
-  Max parallelism: 3
-  Worktrees: disabled (read-only spike, no file modifications)
+
+  - Max parallelism: 3 (one worker per work item).
+  - Worktrees: not required (scopes do not overlap, but worktrees are harmless if the agent team framework provisions them by default).
 
   ## Review cadence
-  Incremental review after each work item. Capstone review after WI-784 completes.
 
-  ## Work Item Groups
+  - **Incremental review**: per work item on completion (default).
+  - **Capstone review**: not required for this cycle. The scope is too small to justify the full /ideate:review cycle. Optionally, a /ideate:review --domain workflow may be run after execution to confirm domain-layer alignment.
+
+  ## Work item groups
 
   ### Group 1 (parallel)
-  - WI-781: Audit StorageAdapter abstraction boundary leaks (small)
-  - WI-782: Catalog PPR algorithm divergences (medium)
-  - WI-783: Run equivalence test suite and catalog divergences (medium)
+  - WI-791 — adapter-contract.md update
+  - WI-792 — ARCHITECTURE.md update
+  - WI-793 — tools/index.ts readOnlyHint annotation
 
-  ### Group 2 (sequential, after Group 1)
-  - WI-784: Synthesize findings into clean interface proposal (medium)
+  ## Dependency graph
 
-  ## Dependency Graph
-  WI-781 → WI-784
-  WI-782 → WI-784
-  WI-783 → WI-784
+  All three items have empty `depends` and `blocks`. DAG is three disconnected nodes.
 
-  ## Agent Configuration
-  Default model: sonnet
-  Worker type: ideate:worker
-phase: PH-043
+  ## Agent configuration
+
+  - Worker model: sonnet (default; overrides from config.json apply if set).
+  - Work item type: all three are `chore` — minimal context expected (spec + direct file targets).
+
+  ## Success criteria
+
+  - All three work items reach status `done`.
+  - Incremental reviewers return `pass` for each.
+  - No regressions in the existing tools.test.ts suite (affects WI-793).
+phase: PH-046
 agent_model: sonnet
 worktree_config:
   enabled: true
@@ -82,3 +101,11 @@ review_agents:
   - spec-reviewer
   - gap-analyst
 capstone_review: "Run /ideate:review after all three items complete. Focus on adapter boundary integrity: confirm no ctx.db references in tool handlers, no concrete adapter imports above the boundary, and budget-enforcement regression tests pass for both LocalAdapter and RemoteAdapter."
+worktrees_enabled: true
+worktree_isolation: false
+ordering:
+  - WI-835
+  - WI-836
+  - WI-837
+  - WI-838
+execution_notes: Use /ideate:execute or /ideate:autopilot. If autopilot is used, max-cycles should be 3 — this phase should converge in 1-2 cycles since findings are concrete and narrow.

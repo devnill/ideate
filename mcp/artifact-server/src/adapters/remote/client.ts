@@ -275,22 +275,32 @@ export class GraphQLClient {
 
     // Handle 401 Unauthorized - attempt token rotation if tokenProvider is configured
     if (response.status === 401 && this.tokenProvider) {
-      const newToken = await this.tokenProvider();
+      let newToken: string | null;
+      try {
+        newToken = await this.tokenProvider();
+      } catch (err) {
+        throw new StorageAdapterError(
+          `Token rotation failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+          "AUTH_FAILURE"
+        );
+      }
       if (newToken) {
         this.setAuthToken(newToken);
         // Retry the request with the new token
         return this.executeOnceWithAuth<T>(document, variables);
       } else {
-        throw new ConnectionError(
-          `Authentication failed: GraphQL endpoint ${this.endpoint} returned 401 Unauthorized - token rotation failed`
+        throw new StorageAdapterError(
+          `Authentication failed: GraphQL endpoint ${this.endpoint} returned 401 Unauthorized - token rotation failed`,
+          "AUTH_FAILURE"
         );
       }
     }
 
-    // Handle 401 without tokenProvider - authentication failure
+    // Handle 401 without tokenProvider - authentication failure (non-retryable)
     if (response.status === 401) {
-      throw new ConnectionError(
-        `Authentication failed: GraphQL endpoint ${this.endpoint} returned 401 Unauthorized`
+      throw new StorageAdapterError(
+        `Authentication failed: GraphQL endpoint ${this.endpoint} returned 401 Unauthorized`,
+        "AUTH_FAILURE"
       );
     }
 
@@ -343,14 +353,26 @@ export class GraphQLClient {
     document: string,
     variables?: Record<string, unknown>
   ): Promise<T> {
-    const response = await fetch(this.endpoint, {
-      method: "POST",
-      headers: this.headers,
-      body: JSON.stringify({
-        query: document,
-        variables: variables ?? {},
-      }),
-    });
+    let response: Response;
+    try {
+      response = await fetch(this.endpoint, {
+        method: "POST",
+        headers: this.headers,
+        body: JSON.stringify({
+          query: document,
+          variables: variables ?? {},
+        }),
+      });
+    } catch (err) {
+      // Throw StorageAdapterError (not ConnectionError) so the outer execute()
+      // retry loop does not retry the post-rotation path. ConnectionError is
+      // unconditionally retryable via isRetryableError; StorageAdapterError
+      // with code 'CONNECTION_ERROR' is not.
+      throw new StorageAdapterError(
+        `Post-rotation request failed: ${this.endpoint} - ${err instanceof Error ? err.message : "Unknown error"}`,
+        "CONNECTION_ERROR"
+      );
+    }
 
     if (!response.ok) {
       throw new StorageAdapterError(
@@ -359,7 +381,15 @@ export class GraphQLClient {
       );
     }
 
-    const body = (await response.json()) as GraphQLResponse<T>;
+    let body: GraphQLResponse<T>;
+    try {
+      body = (await response.json()) as GraphQLResponse<T>;
+    } catch {
+      throw new StorageAdapterError(
+        "Failed to parse GraphQL response as JSON",
+        "PARSE_ERROR"
+      );
+    }
 
     if (body.errors && body.errors.length > 0) {
       throw mapGraphQLError(body.errors[0]);

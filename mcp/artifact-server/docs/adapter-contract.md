@@ -1,7 +1,7 @@
 # StorageAdapter Interface Contract
 
-**Version:** 3.0  
-**Last Updated:** 2026-04-06  
+**Version:** 3.1  
+**Last Updated:** 2026-04-15  
 **Applies To:** LocalAdapter, RemoteAdapter
 
 This document specifies the contract for the `StorageAdapter` interface, which defines the graph-native boundary between MCP tool handlers and storage. All implementations must adhere to this contract.
@@ -583,6 +583,25 @@ Remote adapter connection or authentication failure.
 
 **Code:** `CONNECTION_ERROR`
 
+### AUTH_FAILURE (StorageAdapterError)
+
+Authentication failure — with or without token rotation. Thrown as a base `StorageAdapterError` with code `AUTH_FAILURE` (no dedicated subclass). Remote adapter only.
+
+**Code:** `AUTH_FAILURE`
+
+**Retryable:** No
+
+**Origin:** Remote adapter only
+
+**Trigger conditions:**
+1. `tokenProvider` returns `null` or `undefined` after a 401 response
+2. `tokenProvider` itself throws (e.g., EC2 metadata service timeout)
+3. No `tokenProvider` is configured and the endpoint returns 401 Unauthorized
+
+Note: if the retry after token rotation also returns 401, `executeOnceWithAuth` throws `StorageAdapterError` with code `HTTP_401`, not `AUTH_FAILURE`.
+
+> Introduced in WI-833. Trigger surface expanded in WI-837 (tokenProvider throw path) and WI-840 (no-tokenProvider 401 path).
+
 ### `MissingCycleError extends StorageAdapterError`
 
 Required cycle parameter missing for cycle-scoped type.
@@ -635,6 +654,7 @@ constructor(
 - `MISSING_EDGE_TYPE`: edge missing edge_type
 - `INVALID_EDGE_TYPE`: edge has invalid edge_type
 - `FILESYSTEM_ERROR`: artifact removal failed
+
 
 ---
 
@@ -757,6 +777,7 @@ LocalAdapter and RemoteAdapter must behave identically in the following aspects:
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 3.1 | 2026-04-15 | Added AUTH_FAILURE error type (WI-838) |
 | 3.0 | 2026-04-06 | Added comprehensive validation layer and error codes |
 | 2.0 | 2026-03-20 | Added PPR-based context assembly |
 | 1.0 | 2026-03-01 | Initial interface definition |

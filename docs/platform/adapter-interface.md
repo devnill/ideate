@@ -741,6 +741,19 @@ class MissingCycleError extends StorageAdapterError {
 | `archiveCycle` | **LocalAdapter**: never — returns error string beginning with `"Error during cycle archival"`. **RemoteAdapter**: `ConnectionError` or `StorageAdapterError` on transport/HTTP/auth failure; archival-logic errors from the server are returned as the response string, not thrown. | -- |
 | `appendJournalEntry` | `StorageAdapterError` (I/O) | -- |
 
+### 5.3 AUTH_FAILURE Error Code
+
+Thrown as a base `StorageAdapterError` with code `AUTH_FAILURE` (no dedicated subclass). Remote adapter only. Not retryable.
+
+**Trigger conditions:**
+1. `tokenProvider` returns `null` or `undefined` after a 401 response
+2. `tokenProvider` itself throws (e.g., EC2 metadata service timeout)
+3. No `tokenProvider` is configured and the endpoint returns 401 Unauthorized
+
+Note: if the retry after token rotation also returns 401, `executeOnceWithAuth` throws `StorageAdapterError` with code `HTTP_401`, not `AUTH_FAILURE`.
+
+Introduced in WI-833. Trigger surface expanded in WI-837 (tokenProvider throw path) and WI-840 (no-tokenProvider 401 path).
+
 ---
 
 ## 6. Transaction Semantics
@@ -806,3 +819,4 @@ function selectAdapter(
   drizzleDb?: BetterSQLite3Database
 ): StorageAdapter;
 ```
+

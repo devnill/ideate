@@ -1,0 +1,20 @@
+id: interview-refine-029
+type: interview
+cycle: 29
+trigger: post-review-documentation-sync
+entries:
+  - question: What is the scope of this refinement?
+    answer: Documentation sync for cycle 28 decisions — three one-line fixes identified by cycle 28 reviewers (F-CYCLE-28-II1, F-CYCLE-28-MI1, F-CYCLE-28-M3). The fixes align documentation and tool metadata with the decisions recorded in D-210 (max_nodes semantics) and D-211 (metrics soft-deprecation).
+    domain: workflow
+  - question: Do the guiding principles still hold?
+    answer: Yes, unchanged. This refinement executes decisions already made in cycle 28 — no new principles or principle changes are implied.
+    domain: null
+  - question: Should the documentation fixes be a new phase or folded into the active phase PH-044?
+    answer: Fold into PH-044. The phase intent is the max_nodes alignment and metrics soft-deprecation work that cycle 28 completed; these documentation fixes are the natural follow-up to keep docs consistent with what was built.
+    domain: workflow
+  - question: What is the execution strategy?
+    answer: Batched parallel. All three work items have single-file, non-overlapping scope and are independent. No dependencies between them. Trivial complexity — line-level edits with known target locations.
+    domain: workflow
+cycle_modified: 27
+content_hash: 31c395ec531e5eb2c24ffef7617e2a603d629d914923202b9b68317d601a0169
+token_count: 333

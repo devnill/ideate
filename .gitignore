@@ -44,3 +44,6 @@ scripts/migrate-to-v3.js.map
 .ideate/index.db-shm
 
 reports/
+
+# Local worktree scratch (ideate execute skill)
+.worktrees/

@@ -1,0 +1,12 @@
+id: F-CYCLE-29-S2
+type: finding
+severity: significant
+source: code-reviewer
+title: Test F missing fetch call count assertion — retry bug invisible
+description: Test F asserts only ConnectionError type and message content but does not assert fetchSpy.toHaveBeenCalledTimes(2). The test passes even when fetch is called 4+ times due to the outer retry loop. Test wall time of 2505ms with mocked fetch confirms backoff delays are firing.
+file: mcp/artifact-server/src/__tests__/remote-adapter.test.ts
+line: 387
+cycle: 29
+cycle_modified: 27
+content_hash: 594bc392d937a8ee7f6b4ef019ac3687476bd37a4db49d5e16533d43ffad5aee
+token_count: 134

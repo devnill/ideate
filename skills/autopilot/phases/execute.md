@@ -83,6 +83,7 @@ The worker prompt must instruct the agent to:
 - Respect all constraints from the digest (read full constraints if needed)
 - Not make design decisions beyond what the spec prescribes
 - Report completion with a list of files created or modified
+- Never read, write, or reference `.ideate/` paths directly — artifact writes must go through MCP tools (GP-14). If you discover you have already written to `.ideate/` directly, re-sync by writing through the appropriate MCP tool and discard the direct-file write (P-87).
 
 The worker prompt must also include this self-check instruction:
 
@@ -201,6 +202,15 @@ If a severity section has no findings, include the header with "None." underneat
 - **Critical findings fixable within scope (non-startup-failure, non-infrastructure-failure)**: Fix. Note as significant rework in the journal entry.
 - **Critical findings that are scope-changing or worktree merge conflicts**: Do NOT fix. Route to Andon cord → proxy-human (see below).
 - **Unmet acceptance criteria**: Attempt to fix. If unfixable due to spec issues, route to Andon cord → proxy-human.
+
+### GP-14 Violation Re-Sync (P-87)
+
+When a worker's completion report lists any `.ideate/` file modifications, the parent must:
+
+1. Record a **minor finding** in the incremental review output citing GP-14 and P-87: the worker bypassed the MCP abstraction boundary. The finding tracks the worker-prompt defect; re-sync is the mechanical recovery, not the fix.
+2. Re-issue each `.ideate/` write via the appropriate MCP tool — `ideate_write_artifact`, `ideate_update_work_items`, `ideate_append_journal`, or equivalent — to establish canonical provenance in the runtime artifact graph.
+
+The direct write by the worker is still a violation even when mitigated. See P-87 for the full policy text.
 
 ### Andon Cord → Proxy-Human Routing
 

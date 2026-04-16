@@ -1,7 +1,16 @@
 id: PR-002
 type: project
-current_phase_id: PH-043
+current_phase_id: PH-046
 horizon:
+  current: PH-046
+  next: []
+  later:
+    - id: PH-046-candidate
+      name: StorageAdapter equivalence test gap closure
+      description: "Five equivalence test additions: readNodeContent, archiveCycle, queryGraph, countNodes, traverse structural assertions."
+    - id: PH-047-candidate
+      name: Quality metrics rebuild
+      description: "Design and implement replacement telemetry for the metrics infrastructure soft-deprecated in PH-044. Goals: capture actionable data (token use, agent latency, review-cycle efficiency, rework rate) with measurements that can be trusted. Remove deprecated ideate_emit_metric and ideate_get_metrics MCP tools, drop metrics_events table and .ideate/metrics YAML files, strip emission call sites from all skills. Prior system failed because aggregation logic was brittle (JSON extracts, heuristic de-duplication, multiple token-counting paths) and produced data that could not be used with confidence."
   completed:
     - PH-017
     - PH-018
@@ -24,20 +33,11 @@ horizon:
     - PH-041
     - PH-042
     - PH-043
-  next: []
-  later:
-    - id: PH-044-candidate
-      name: RemoteAdapter P1 divergence fixes
-      description: max_nodes semantic alignment (D4), metrics.ts raw SQL (Leak 7), always_include_types case forwarding re-evaluation. Follows PH-043 P0 closure.
-    - id: PH-045-candidate
-      name: RemoteAdapter P2 dead code and convention cleanup
-      description: CONTAINMENT_EDGE_TYPES removal, edge type case normalization, test-only adapter fallback removal. Low-risk cleanup.
-    - id: PH-046-candidate
-      name: StorageAdapter equivalence test gap closure
-      description: "Five equivalence test additions: readNodeContent, archiveCycle, queryGraph, countNodes, traverse structural assertions."
+    - PH-044
+    - PH-045
 intent: Refactor and harden the StorageAdapter implementations for production use
 name: Ideate Plugin - Adapter Refactor
 status: active
-content_hash: 62e54993fa946ca49b7dcdd5f707f788ff00733660831a95a49b63509ac287c7
-token_count: 324
+content_hash: 7346c03d128dbbe2e47d987f09e622b62534af92dfa6be53233b2b056dda455b
+token_count: 391
 cycle_modified: 27

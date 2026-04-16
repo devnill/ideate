@@ -9,14 +9,15 @@
  * unconditionally because they do not require a live server.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
 import fs from "fs";
 import os from "os";
 import path from "path";
 
 import { selectAdapter } from "../server.js";
 import { RemoteAdapter } from "../adapters/remote/index.js";
-import { ConnectionError } from "../adapter.js";
+import { ConnectionError, StorageAdapterError } from "../adapter.js";
+import { GraphQLClient } from "../adapters/remote/client.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -210,6 +211,224 @@ describeLive("RemoteAdapter — live server at localhost:4000", () => {
     const adapter = selectAdapter(ideateDir, null as any, null as any) as RemoteAdapter;
     // initialize() should resolve without throwing
     await expect(adapter.initialize()).resolves.not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// tokenProvider 401 rotation tests — no live server required
+// ---------------------------------------------------------------------------
+
+// Tests exercise client.ts:276-295 — 401 Unauthorized + tokenProvider rotation path.
+// Documented in adapter-interface.md Section 7 (AdapterConfig.tokenProvider).
+describe("tokenProvider 401 rotation", () => {
+  // Each test spies on globalThis.fetch and must restore it after.
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * Helper: build a minimal Response-like object that globalThis.fetch can return.
+   */
+  function makeFetchResponse(
+    status: number,
+    body: unknown
+  ): Response {
+    const bodyText = JSON.stringify(body);
+    return new Response(bodyText, {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  it("Test A: 401 → token rotation → retry with new token → 200 succeeds", async () => {
+    const tokenProvider = vi.fn().mockResolvedValue("new-token-value");
+
+    const client = new GraphQLClient(
+      "http://fake-endpoint/graphql",
+      { Authorization: "Bearer old-token" },
+      tokenProvider
+    );
+
+    const successBody = { data: { result: "ok" } };
+
+    // Track what Authorization header was sent on each call
+    const capturedAuthHeaders: (string | null)[] = [];
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const headers = init?.headers as Record<string, string> | undefined;
+        capturedAuthHeaders.push(headers?.["Authorization"] ?? null);
+
+        // First call: 401. Second call: 200 with valid GraphQL response.
+        if (capturedAuthHeaders.length === 1) {
+          return Promise.resolve(
+            new Response(null, { status: 401, statusText: "Unauthorized" })
+          );
+        }
+        return Promise.resolve(makeFetchResponse(200, successBody));
+      }
+    );
+
+    const result = await client.query<{ result: string }>("{ result }");
+
+    // tokenProvider must be called exactly once
+    expect(tokenProvider).toHaveBeenCalledTimes(1);
+
+    // fetch must be called twice (original + retry)
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    // The initial request must have used the original token
+    expect(capturedAuthHeaders[0]).toBe("Bearer old-token");
+
+    // The retry (second call) must use the new token
+    expect(capturedAuthHeaders[1]).toBe("Bearer new-token-value");
+
+    // The resolved value must be the 200 body's data
+    expect(result).toEqual({ result: "ok" });
+  });
+
+  it("Test B: tokenProvider returns null → throws StorageAdapterError with AUTH_FAILURE code", async () => {
+    const tokenProvider = vi.fn().mockResolvedValue(null);
+
+    const client = new GraphQLClient(
+      "http://fake-endpoint/graphql",
+      { Authorization: "Bearer old-token" },
+      tokenProvider
+    );
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(null, { status: 401, statusText: "Unauthorized" })
+    );
+
+    await expect(client.query("{ result }")).rejects.toSatisfy((err: unknown) => {
+      return err instanceof StorageAdapterError &&
+        (err as StorageAdapterError).code === "AUTH_FAILURE";
+    });
+    expect(tokenProvider).toHaveBeenCalledTimes(1);
+  });
+
+  it("Test C: tokenProvider returns undefined → throws StorageAdapterError with AUTH_FAILURE code", async () => {
+    // TokenProvider typed as () => Promise<string | null> but undefined is treated
+    // the same as null (falsy) in the implementation's `if (newToken)` guard.
+    const tokenProvider = vi.fn().mockResolvedValue(undefined);
+
+    const client = new GraphQLClient(
+      "http://fake-endpoint/graphql",
+      { Authorization: "Bearer old-token" },
+      // Cast to satisfy TypeScript; runtime value is undefined (falsy → same null path)
+      tokenProvider as () => Promise<string | null>
+    );
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(null, { status: 401, statusText: "Unauthorized" })
+    );
+
+    await expect(client.query("{ result }")).rejects.toSatisfy((err: unknown) => {
+      return err instanceof StorageAdapterError &&
+        (err as StorageAdapterError).code === "AUTH_FAILURE";
+    });
+    expect(tokenProvider).toHaveBeenCalledTimes(1);
+  });
+
+  it("Test D: 401 on both calls — tokenProvider called exactly once, second 401 throws StorageAdapterError", async () => {
+    // NOTE: executeOnceWithAuth (the retry path) does NOT re-enter the
+    // tokenProvider rotation guard — it calls !response.ok and throws
+    // StorageAdapterError("HTTP_401") directly. This means there is no
+    // infinite retry loop; tokenProvider is called at most once per request.
+    //
+    // Behaviour verified against the executeOnceWithAuth throw-vs-retry logic in client.ts.
+    const tokenProvider = vi.fn().mockResolvedValue("new-token");
+
+    const client = new GraphQLClient(
+      "http://fake-endpoint/graphql",
+      { Authorization: "Bearer old-token" },
+      tokenProvider
+    );
+
+    // Both the original request and the retry return 401
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(null, { status: 401, statusText: "Unauthorized" })
+    );
+
+    // The retry path (executeOnceWithAuth) throws StorageAdapterError on 401,
+    // not ConnectionError, because it has no tokenProvider logic.
+    // StorageAdapterError is NOT retryable in execute(), so it propagates immediately.
+    await expect(client.query("{ result }")).rejects.toSatisfy((err: unknown) => {
+      return err instanceof StorageAdapterError &&
+        (err as StorageAdapterError).code === "HTTP_401";
+    });
+
+    // tokenProvider called exactly once — no second rotation attempt
+    expect(tokenProvider).toHaveBeenCalledTimes(1);
+    // Exactly 2 fetch calls: original request + one post-rotation retry
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("Test E: tokenProvider throws → StorageAdapterError with AUTH_FAILURE code", async () => {
+    const tokenProvider = vi.fn().mockRejectedValue(new Error("EC2 metadata timeout"));
+
+    const client = new GraphQLClient(
+      "http://fake-endpoint/graphql",
+      { Authorization: "Bearer old-token" },
+      tokenProvider
+    );
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(null, { status: 401, statusText: "Unauthorized" })
+    );
+
+    await expect(client.query("{ result }")).rejects.toSatisfy((err: unknown) => {
+      return err instanceof StorageAdapterError &&
+             (err as StorageAdapterError).code === "AUTH_FAILURE" &&
+             (err as StorageAdapterError).message.includes("EC2 metadata timeout");
+    });
+
+    expect(tokenProvider).toHaveBeenCalledTimes(1);
+  });
+
+  it("Test F: executeOnceWithAuth network error → StorageAdapterError (non-retryable)", async () => {
+    // First call returns 401, tokenProvider succeeds, second call (executeOnceWithAuth) throws network error.
+    // executeOnceWithAuth throws StorageAdapterError (not ConnectionError) so the outer
+    // execute() retry loop does not retry the post-rotation path.
+    const tokenProvider = vi.fn().mockResolvedValue("new-token");
+
+    const client = new GraphQLClient(
+      "http://fake-endpoint/graphql",
+      { Authorization: "Bearer old-token" },
+      tokenProvider
+    );
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    // First call: 401 (triggers tokenProvider)
+    fetchSpy.mockResolvedValueOnce(
+      new Response(null, { status: 401, statusText: "Unauthorized" })
+    );
+    // Second call: network error (executeOnceWithAuth)
+    fetchSpy.mockRejectedValueOnce(new TypeError("fetch failed"));
+
+    await expect(client.query("{ result }")).rejects.toSatisfy((err: unknown) => {
+      return err instanceof StorageAdapterError &&
+        (err as StorageAdapterError).code === "CONNECTION_ERROR" &&
+        (err as StorageAdapterError).message.includes("fake-endpoint");
+    });
+
+    // Exactly 2 fetch calls: original request + one post-rotation retry (no outer-loop retries)
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("Test G: 401 without tokenProvider → StorageAdapterError with AUTH_FAILURE", async () => {
+    // GraphQLClient without tokenProvider — 401 is a direct auth failure, no rotation.
+    const client = new GraphQLClient("http://fake-endpoint/graphql");
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(null, { status: 401, statusText: "Unauthorized" })
+    );
+
+    await expect(client.query("{ result }")).rejects.toSatisfy((err: unknown) => {
+      return err instanceof StorageAdapterError &&
+        (err as StorageAdapterError).code === "AUTH_FAILURE" &&
+        (err as StorageAdapterError).message.includes("fake-endpoint");
+    });
   });
 });
 

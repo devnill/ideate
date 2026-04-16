@@ -260,5 +260,5 @@ BLOCKS: 0.3       (weakest - blocking relationships)
 | alpha out of range | VALIDATION_ERROR | Not in runPPR | ⚠️ Divergent |
 | maxIterations invalid | VALIDATION_ERROR | Not in runPPR | ⚠️ Divergent |
 | convergence invalid | VALIDATION_ERROR | Not in runPPR | ⚠️ Divergent |
-| maxNodes invalid | VALIDATION_ERROR | Not in runPPR | ⚠️ Divergent |
+| ~~maxNodes invalid~~ | (removed in WI-789, see D-210) | n/a | n/a |
 | always_include_types | VALIDATION_ERROR | GraphQL validation | ✅ Equivalent |

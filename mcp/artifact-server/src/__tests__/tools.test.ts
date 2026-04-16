@@ -847,6 +847,7 @@ describe("handleGetConvergenceStatus", () => {
 
     expect(result).toContain("converged: false");
     expect(result).toContain("principle_verdict: unknown");
+    expect(result).toContain("condition_b: false");
   });
 
   it("error path: missing or invalid cycle_number throws", async () => {
@@ -970,10 +971,10 @@ describe("handleGetConvergenceStatus", () => {
     const canonicalPath = path.join(cycleDir, "spec-adherence.yaml");
     fs.writeFileSync(
       canonicalPath,
-      "id: spec-adherence\ntype: cycle_summary\ncycle: 200\ncontent: |-\n  **Principle Violation Verdict**: Pass\n\n  All reviewers returned Pass with zero significant findings.\n",
+      "id: spec-adherence-200\ntype: cycle_summary\ncycle: 200\ncontent: |-\n  **Principle Violation Verdict**: Pass\n\n  All reviewers returned Pass with zero significant findings.\n",
       "utf8"
     );
-    insertNode("spec-adherence", "cycle_summary", { file_path: canonicalPath, cycle_created: 200 });
+    insertNode("spec-adherence-200", "cycle_summary", { file_path: canonicalPath, cycle_created: 200 });
 
     // No findings for cycle 200 → condition_a: true
     const result = await handleGetConvergenceStatus(ctx, { cycle_number: 200 });
@@ -1072,6 +1073,107 @@ describe("handleGetConvergenceStatus", () => {
     ctx.adapter = new LocalAdapter({ db, drizzleDb: ctx.drizzleDb!, ideateDir: artifactDir });
     const data = await ctx.adapter.getConvergenceData(203);
     expect(data.cycle_summary_content).toBeNull();
+  });
+
+  it("regression WI-831: legacy SA-NNN.yaml Fail + canonical passing files yields converged:true", async () => {
+    // Reproducer: cycle dir contains SA-NNN.yaml (legacy, verdict:Fail) alongside
+    // canonical code-quality.yaml, spec-adherence.yaml, and gap-analysis.yaml all
+    // with Pass verdicts.
+    //
+    // Before fix option (c): the legacy SA-NNN.yaml could be picked up as a
+    // cycle_summary, driving condition_b:false and converged:false even though
+    // the current cycle's spec-adherence.yaml shows Pass.
+    //
+    // After fix option (c) (WI-824): strict canonical-only file selection ignores
+    // SA-NNN.yaml entirely because its file_path does not end with /spec-adherence.yaml
+    // or /summary.yaml. Only spec-adherence.yaml drives condition_b, which is true.
+    const cycleDir = path.join(artifactDir, "cycles", "204");
+    fs.mkdirSync(cycleDir, { recursive: true });
+
+    // Legacy SA-204.yaml with Fail verdict — present in same directory as canonical files
+    const legacyPath = path.join(cycleDir, "SA-204.yaml");
+    fs.writeFileSync(
+      legacyPath,
+      "id: SA-204\ntype: cycle_summary\ncycle: 204\ncontent: |-\n  ## Verdict: Fail\n\n  Stale archive from a prior cycle slot.\n",
+      "utf8"
+    );
+    insertNode("SA-204", "cycle_summary", { file_path: legacyPath, cycle_created: 204 });
+
+    // Canonical code-quality.yaml with Pass (not a cycle_summary type, so not
+    // selected by getConvergenceData — included here to mirror the exact WI-831
+    // reproducer where all three canonical review files are present)
+    const cqPath = path.join(cycleDir, "code-quality.yaml");
+    fs.writeFileSync(
+      cqPath,
+      "id: code-quality-204\ntype: cycle_review\ncycle: 204\ncontent: |-\n  ## Verdict: Pass\n\n  No quality issues found.\n",
+      "utf8"
+    );
+    insertNode("code-quality-204", "cycle_review", { file_path: cqPath, cycle_created: 204 });
+
+    // Canonical spec-adherence.yaml with Pass verdict — this is the cycle_summary
+    // that getConvergenceData must select; it drives condition_b
+    const adherencePath = path.join(cycleDir, "spec-adherence.yaml");
+    fs.writeFileSync(
+      adherencePath,
+      "id: spec-adherence-204\ntype: cycle_summary\ncycle: 204\ncontent: |-\n  **Principle Violation Verdict**: Pass\n\n  All reviewers returned Pass. Zero significant findings.\n",
+      "utf8"
+    );
+    insertNode("spec-adherence-204", "cycle_summary", { file_path: adherencePath, cycle_created: 204 });
+
+    // Canonical gap-analysis.yaml with Pass (not a cycle_summary type)
+    const gaPath = path.join(cycleDir, "gap-analysis.yaml");
+    fs.writeFileSync(
+      gaPath,
+      "id: gap-analysis-204\ntype: cycle_review\ncycle: 204\ncontent: |-\n  ## Verdict: Pass\n\n  No gaps found.\n",
+      "utf8"
+    );
+    insertNode("gap-analysis-204", "cycle_review", { file_path: gaPath, cycle_created: 204 });
+
+    // Attach LocalAdapter — routes through reader.ts:getConvergenceData
+    ctx.adapter = new LocalAdapter({ db, drizzleDb: ctx.drizzleDb!, ideateDir: artifactDir });
+
+    // No findings for cycle 204 → condition_a: true
+    // spec-adherence-204 has Principle Violation Verdict: Pass → condition_b: true
+    // SA-204.yaml (Fail) must be ignored — converged must be true
+    const result = await handleGetConvergenceStatus(ctx, { cycle_number: 204 });
+    expect(result).toContain("condition_b: true");
+    expect(result).toContain("principle_verdict: pass");
+    expect(result).toContain("converged: true");
+  });
+
+  it("regression WI-836 (symmetric): legacy SA-NNN.yaml Pass + canonical spec-adherence.yaml Fail yields condition_b:false", async () => {
+    // Symmetric case of WI-831: legacy file has Pass, canonical has Fail.
+    // Canonical file must win — condition_b must be false.
+    const cycleDir = path.join(artifactDir, "cycles", "205");
+    fs.mkdirSync(cycleDir, { recursive: true });
+
+    // Legacy SA-205.yaml with Pass verdict — must be ignored
+    const legacyPath = path.join(cycleDir, "SA-205.yaml");
+    fs.writeFileSync(
+      legacyPath,
+      "id: SA-205\ntype: cycle_summary\ncycle: 205\ncontent: |-\n  ## Verdict: Pass\n\n  Legacy archive with Pass verdict.\n",
+      "utf8"
+    );
+    insertNode("SA-205", "cycle_summary", { file_path: legacyPath, cycle_created: 205 });
+
+    // Canonical spec-adherence.yaml with Fail verdict — this must drive condition_b
+    const adherencePath = path.join(cycleDir, "spec-adherence.yaml");
+    fs.writeFileSync(
+      adherencePath,
+      "id: spec-adherence-205\ntype: cycle_summary\ncycle: 205\ncontent: |-\n  **Principle Violation Verdict**: Fail\n\n  Two principle violations found in current cycle.\n",
+      "utf8"
+    );
+    insertNode("spec-adherence-205", "cycle_summary", { file_path: adherencePath, cycle_created: 205 });
+
+    // Attach LocalAdapter
+    ctx.adapter = new LocalAdapter({ db, drizzleDb: ctx.drizzleDb!, ideateDir: artifactDir });
+
+    // condition_b must be false because canonical spec-adherence.yaml has Fail
+    // SA-205.yaml (Pass) must be ignored
+    const result = await handleGetConvergenceStatus(ctx, { cycle_number: 205 });
+    expect(result).toContain("condition_b: false");
+    expect(result).toContain("principle_verdict: fail");
+    expect(result).toContain("converged: false");
   });
 });
 

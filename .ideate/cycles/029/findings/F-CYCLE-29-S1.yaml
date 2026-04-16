@@ -1,0 +1,12 @@
+id: F-CYCLE-29-S1
+type: finding
+severity: significant
+source: code-reviewer
+title: executeOnceWithAuth ConnectionError retried by outer execute() loop
+description: executeOnceWithAuth throws ConnectionError on network failure. isRetryableError returns true for all ConnectionError instances, so the outer execute() retry loop retries the entire flow including tokenProvider rotation. This causes up to 3 tokenProvider calls and 7+ seconds of backoff for what should be an immediate failure. Introduced by WI-837.
+file: mcp/artifact-server/src/adapters/remote/client.ts
+line: 366
+cycle: 29
+cycle_modified: 27
+content_hash: c242606e8db031393d7f438fa4de426ad2f6aa7f1956e272a52370fb81c5fa31
+token_count: 152

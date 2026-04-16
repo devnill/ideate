@@ -1,32 +1,158 @@
 id: decision-log
 type: cycle_summary
 reviewer: journal-keeper
-cycle: 28
-content: |
-  ## Decision Log
+content: |-
+  # Decision Log — Cycle 28 (PH-044)
 
-  ### D-028-1: Standardize on `{project_root}` over `{artifact-dir}`
-  - Context: WI-257 eliminated `{artifact-dir}` prompt but gap-analysis found it still used in review and refine skills
-  - Decision: Adopt `{project_root}` as canonical placeholder across all skills
-  - Rationale: WI-257 established the pattern; both placeholders create inconsistency
+  ## Decisions
 
-  ### D-028-2: Complete type name consistency fix in refine skill
-  - Context: WI-256 fixed line 60 but line 61 still uses `"work-items"` instead of `"work_item"`
-  - Decision: Extend WI-256 scope to fix line 61
-  - Rationale: Partial fixes create technical debt
+  ### D-028-01: Select pure-slice semantic for `max_nodes` — remove graph-size abort entirely
+  - **Phase**: PH-044 refine interview
+  - **Decision**: Adopt Option (b) — pure result-count slice. Remove the `if (totalNodes > maxNodes) return []` abort from `ppr.ts`. LocalContextAdapter gains a post-sort slice; RemoteAdapter already had the equivalent client-side slice.
+  - **Rationale**: RemoteAdapter already applied a client-side result-count slice but LocalAdapter never had the matching slice — the divergence was a LocalAdapter omission. Options (a)/(c) would have preserved an abort that never existed on the remote side.
+  - **Implications**: `computePPR` now runs over the full graph regardless of size. `max_nodes` retained in `PPROptions` as a no-op for backward compatibility. Adapter contract docstring for `TraversalOptions.max_nodes` rewritten.
 
-  ### D-028-3: autopilot state file regression requires immediate fix
-  - Context: WI-252 migrated to YAML but autopilot review phase still references `.md` file
-  - Decision: Create high-priority work item to fix autopilot review phase state file reference
-  - Rationale: Functional regression that will cause skill failures
+  ### D-028-02: Drop D6 (always_include_types case forwarding) from PH-044 scope
+  - **Phase**: PH-044 refine interview, Q4
+  - **Decision**: Dismiss D6 from the RF-clean-interface-proposal remediation list. No code change required.
+  - **Rationale**: Architect survey confirmed the case conversion is applied uniformly to all enum fields on the RemoteAdapter input side. It is a correct implementation detail, not an asymmetry.
+  - **Implications**: No WI created for D6. Future adapter equivalence work should not re-investigate this.
+
+  ### D-028-03: Soft-deprecate metrics infrastructure rather than fix Leak 7
+  - **Phase**: PH-044 refine interview, Q2-Q3
+  - **Decision**: `handleEmitMetric` becomes a no-op; `handleGetMetrics` preserved unchanged for historical reads. Both MCP tool descriptions prefixed with "Deprecated —". Future phase (PH-047-candidate) handles hard removal.
+  - **Rationale**: User expressed distrust in aggregation logic ("bad data is worse than no data"). Fixing Leak 7 in a system slated for removal is wasted effort. Soft deprecation stops new bad data, preserves historical data, signals intent.
+  - **Implications**: No new metric events enter `metrics_events`. Skill call sites explicitly not modified — no-op calls are harmless. Leak 7 persists as documented known limitation.
+
+  ### D-028-04: Retain `maxNodes` in `PPROptions` as unused backward-compatibility field
+  - **Phase**: Execution (WI-789)
+  - **Decision**: Keep `maxNodes` in `PPROptions` with updated JSDoc noting it is ignored internally.
+  - **Rationale**: Callers passing `maxNodes` should not receive type errors. Deleting the field would require caller updates even though behavior is unchanged.
+  - **Implications**: Future callers should pass `max_nodes` via `TraversalOptions`, not directly to `computePPR`.
+
+  ### D-028-05: Accept out-of-scope `tools.test.ts` modification for WI-790
+  - **Phase**: Execution (WI-790 incremental review)
+  - **Decision**: Worker modified `__tests__/tools.test.ts` (not in declared file scope) to align two existing assertions with the no-op contract. Incremental reviewer accepted without rework.
+  - **Rationale**: Strict scope enforcement would have forced rework for a two-line alignment causally required by the logic change.
+  - **Implications**: Precedent: minimal test-file touches outside declared scope are acceptable when causally required and trivial in size.
+
+  ### D-028-06: Classify M2 adapter asymmetry as pre-existing design boundary, not regression
+  - **Phase**: Capstone review
+  - **Decision**: The behavioral difference between adapters when `max_nodes` is combined with `always_include_types` is consistent with D-5 (D-207 in domain layer). Not a regression introduced by this cycle.
+  - **Rationale**: D-5 establishes that adapters operate on structurally different graph scopes. The `max_nodes` population difference is a downstream consequence.
+  - **Implications**: M2 asymmetry is an open item for future equivalence-cleanup WI (referenced as WI-D2 in RF-clean-interface-proposal). Documented but does not block PH-044 completion.
 
   ## Open Questions
 
-  - Q-028-1: Should we audit for remaining `.md` state file references from WI-252?
-  - Q-028-2: What is the canonical subdirectory list for `.ideate/` scaffolding?
-  - Q-028-3: How should work items clarify project-wide versus single-skill pattern changes?
+  ### OQ-028-01: M2 adapter asymmetry — max_nodes population when always_include_types is non-empty
+  LocalAdapter slices only the `ranked` list; RemoteAdapter slices from full response. When both parameters provided, adapters return different total counts. Future equivalence-cleanup WI required.
 
-  ## Cross-References
-  - WI-256: code-reviewer passed but spec-reviewer found additional issue at line 61
-  - WI-257: Cross-skill impact — {artifact-dir} persists in review/refine skills
-  - WI-252: autopilot-state.md regression indicates scope verification gap
+  ### OQ-028-02: Leak 7 — `handleGetMetrics` uses `ctx.db.prepare` directly (pre-existing)
+  Bypass violates GP-14. Slated for PH-047-candidate. Q-157 tracks related composition feasibility.
+
+  ### OQ-028-03: `ideate_emit_metric` MCP annotation `readOnlyHint: false` misdescribes the no-op
+  One-field change in `tools/index.ts:588`. No design decision required.
+
+  ### OQ-028-04: adapter-contract.md max_nodes description not updated
+  One-line update to `docs/adapter-contract.md:223`. Next refinement cycle.
+
+  ### OQ-028-05: ARCHITECTURE.md metrics tool descriptions not updated to reflect deprecated status
+  Two-line change to ARCHITECTURE.md:408-409. Next refinement cycle alongside OQ-028-04.
+
+  ### OQ-028-06: No domain decision record for max_nodes semantic alignment (D4 resolution)
+  Curator responsibility. Resolution lives only in interview + WI-789 spec, not the queryable domain layer.
+
+  ### OQ-028-07: No domain decision record for metrics soft-deprecation (WI-790 architectural choice)
+  Curator responsibility. Rationale lives only in interview + WI-790 spec. Q-157 in domain layer should be updated to "resolved by soft-deprecation".
+
+  ### OQ-028-08: PH-047-candidate (quality metrics rebuild) — when and how?
+  User decision required. Soft deprecation becomes permanent by default otherwise.
+
+  ## Cross-Reviewer Connections
+
+  ### CC1: M2 Asymmetry
+  Code-reviewer M2 + spec-reviewer observation + gap-analyst II1 all see the same adapter divergence territory from different angles (correctness, test coverage, documentation hygiene).
+
+  ### CC2: Leak 7 / metrics soft-deprecation
+  Code-reviewer M1 (add TODO referencing decision) and gap-analyst MI3 (write the decision record) are the same problem from two sides. Must be resolved together: curator writes record, then follow-up WI adds reference comment. Also connects to Q-157.
+
+  ### CC3: Documentation debt cluster
+  adapter-contract.md + ARCHITECTURE.md both stale. Spec-reviewer correctly did not flag (not in WI-789 ACs); gap-analyst correctly identified. Three docs describe `max_nodes` correctly, two incorrectly — should be addressed together in a single small WI next cycle.
+
+  ### CC4: Domain layer completeness
+  PH-044 closed two important questions but neither closure promoted to the domain layer. MI2/MI3 are curator tasks. Q-157 should be updated to "resolved by soft-deprecation" once MI3 decision record is written.
+content_hash: 4df580756346c2d74c61b4c5dba8dd089a8936109b90b449eef27bf587631e89
+token_count: 2522
+file_path: .ideate/cycles/068/decision-log.yaml
+cycle: 28
+decisions:
+  - id: D-CY23-01
+    topic: Inline vs above-line comment placement for reserved keyword advisories
+    outcome: Inline trailing comments used; spec said 'above'. Minor positioning divergence.
+  - id: D-CY23-02
+    topic: constraints labeled as reserved keyword
+    outcome: Factually inaccurate — CONSTRAINT (singular) is reserved, CONSTRAINTS (plural table name) is not.
+  - id: D-CY23-03
+    topic: trigger quoting requirement documentation
+    outcome: Comment overstates quoting need — SQLite allows trigger unquoted in DML. Production code already uses it unquoted.
+  - id: D-CY23-04
+    topic: cols.length assertion omitted from 8 new describe blocks
+    outcome: Systematic omission flagged by 3 reviewers independently. nodes table establishes the pattern at line 74 but new blocks don't follow it.
+  - id: D-CY23-05
+    topic: NOT NULL tests omitted for projects and phases
+    outcome: Gap identified by code-reviewer (M3) and gap-analyst (MI2). Only extension tables with column tests but no NOT NULL assertions.
+  - id: D-CY23-06
+    topic: Unspecified reserved keyword comment in CASCADE test
+    outcome: Comment added in WI-766 CASCADE test for constraints table, outside WI-766 spec. Consistent with WI-763 intent.
+  - id: D-CY23-07
+    topic: ALL_NODE_TYPES test renamed to 'is readonly array'
+    outcome: Name misleading — test checks Array.isArray and length > 0, not immutability. Naming carry-forward.
+open_questions:
+  - id: OQ-CY23-01
+    question: Are reserved keyword comments factually accurate? Should they be corrected?
+    source: M1, M2
+  - id: OQ-CY23-02
+    question: Should cols.length assertions be added to all 10 extension table describe blocks?
+    source: N1, M3, MI2
+  - id: OQ-CY23-03
+    question: Should NOT NULL tests be added for projects and phases?
+    source: M3, MI2
+  - id: OQ-CY23-04
+    question: Should 'is readonly array' test be renamed to match assertions?
+    source: M4
+  - id: OQ-CY23-05
+    question: Should idx_nodes_type_file_path index be added to index tests?
+    source: MI1
+  - id: OQ-CY23-06
+    question: Should NOT NULL constraints be fully tested for interview_questions?
+    source: MI3
+  - id: OQ-CY23-07
+    question: Should work_item_type DEFAULT value be asserted?
+    source: IR1
+  - id: OQ-CY23-08
+    question: Should timestamp column get a reserved keyword advisory like trigger?
+    source: IR2
+cross_references:
+  - id: CR1
+    topic: projects/phases NOT NULL gap
+    reviewers:
+      - code-reviewer M3
+      - gap-analyst MI2
+  - id: CR2
+    topic: cols.length assertion omission
+    reviewers:
+      - spec-reviewer N1
+      - gap-analyst MI2
+  - id: CR3
+    topic: reserved keyword comment accuracy
+    reviewers:
+      - code-reviewer M1/M2
+      - spec-reviewer AC1/U1
+      - gap-analyst IR2
+  - id: CR4
+    topic: WI-767 test name vs content
+    reviewers:
+      - code-reviewer M4
+convergence: Zero critical, zero significant. Cleanest cycle since cycle 20. Residual gaps are column-count assertions and NOT NULL coverage for projects, phases, interview_questions.
+cycle_modified: 27
+author: journal-keeper
