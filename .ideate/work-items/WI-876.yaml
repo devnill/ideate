@@ -18,7 +18,7 @@ criteria:
   - Retroactively verify cycles 31 and 32 convergence queries now return correct counts
   - Related to WI-874 (legacy-artifact-collision) — both touch convergence-checker data integrity; consider shared fix if root cause overlaps
 domain: null
-phase: null
+phase: PH-050
 work_item_type: bug
 notes: |-
   ## Context
@@ -44,5 +44,5 @@ resolution: null
 status: pending
 cycle_created: 34
 cycle_modified: null
-content_hash: 23f5ec7b4959ffa70a76d9a1e2c041e21575596a21518c4ec88975bd93c3b3cb
+content_hash: 40ecc20b8e7ac69f561ca02d13ca8c4fe65d518cf95914d4581e6840f2ae6559
 token_count: 572

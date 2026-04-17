@@ -1,0 +1,21 @@
+id: PH-050
+type: phase
+project: PR-001
+name: Convergence-checker hardening
+phase_type: implementation
+status: active
+started_date: 2026-04-16
+description: Fix two convergence-checker data-integrity bugs that surfaced during PR-002 autopilot runs. Both affect the reliability of autopilot convergence decisions and were bypassed in prior cycles via proxy-human override — that mitigation is not sustainable. Investigate shared root cause (SQLite index refresh semantics + legacy-artifact disambiguation) and apply unified fix where possible.
+work_items:
+  - WI-874
+  - WI-876
+appetite: 3
+success_criteria:
+  - WI-874 reproducer (legacy fail-verdict artifact in cycle slot) resolves to condition_b:Pass after fix
+  - WI-876 reproducer (addressed_by update not reflected in convergence query) resolves to correct count after fix
+  - "Root cause analysis documented: shared SQLite index refresh issue, or two distinct causes with separate fixes"
+  - "No regression: existing convergence tests pass; autopilot convergence behavior unchanged for clean workspaces"
+  - "Retroactive verification: cycles 31, 32, 33 convergence queries return correct counts after fix"
+cycle_modified: 27
+content_hash: cca5c64b10947232858b53eedde621475344bd5b08c2f389d1ed8c8aa401c450
+token_count: 294

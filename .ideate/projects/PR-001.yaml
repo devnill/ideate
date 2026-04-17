@@ -1,7 +1,10 @@
 id: PR-001
 type: project
-current_phase_id: PH-029
+current_phase_id: PH-050
 horizon:
+  current: PH-050
+  next: []
+  later: []
   completed:
     - PH-001
     - PH-002
@@ -21,10 +24,11 @@ horizon:
     - PH-016
     - PH-017
     - PH-026
-  later: []
-  next: []
+    - PH-027
+    - PH-029
 intent: Evolving ideate toward standalone PM platform with multi-stakeholder views
 name: Ideate Platform Strategy
-status: paused
-token_count: 118
-content_hash: 55a2bdb614e61be13f9abab7da5e7ec4422b734c0d767a3814374d0e4718d4a1
+status: active
+token_count: 154
+content_hash: 92e170199d02173f12cc0d7de0994355bf713dbcdf17a031526a964b91a3c22e
+cycle_modified: 27

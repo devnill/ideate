@@ -17,7 +17,7 @@ criteria:
   - "Test coverage: unit or equivalence test covering the collision scenario added. Test must fail against pre-fix code and pass against post-fix code."
   - "Related concern from cycle 32: ideate_get_convergence_status(32) returned principle_verdict:unknown despite spec-adherence artifact containing exact '**Principle Adherence Verdict**: Pass' — verify whether this is a symptom of the same collision bug or a separate parser drift. If separate, note for follow-up; if same, both resolve with this fix."
 domain: null
-phase: PH-049
+phase: PH-050
 work_item_type: bug
 notes: |-
   Discovered 2026-04-14 during autopilot run. cycles/002/SA-002.yaml (a March 29 archive from a prior session) collided with autopilot's internal cycle 2, causing the parser to read the old verdict.
@@ -38,5 +38,5 @@ resolution: null
 status: pending
 cycle_created: null
 cycle_modified: null
-content_hash: c0b5fa2a1a5049971eaca18a411eafe57f8d08415f2fd760411bf24d7df12df9
+content_hash: 1d7a1cb266953eac33838946e711e892810de90ebaacd33ca682b1f591684d88
 token_count: 862
