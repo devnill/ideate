@@ -13,9 +13,9 @@
 // NodeTypeSpec>` annotation causes tsc to error if any NodeType is missing a
 // registry entry, providing exhaustiveness at compile time.
 //
-// Migration: WI-899 will update reader.ts, query.ts, and writer.ts to consume
-// this registry instead of their local maps.  This file is additive only —
-// no behavioral change in WI-898.
+// WI-904 added buildRow to NodeTypeSpec: each entry now carries a function that
+// converts raw YAML properties into the extension-table row shape, eliminating
+// the 390-line if/else dispatch chain in writer.ts.
 
 import type { NodeType } from "./adapter.js";
 import type { AnyTable } from "./db.js";
@@ -77,6 +77,22 @@ export interface NodeTypeSpec {
    * Types without an extension table (autopilot_state) are not.
    */
   isQueryable: boolean;
+
+  /**
+   * Build the extension-table row from raw YAML properties.
+   *
+   * Called by writer.ts to convert the content of a node's YAML file into the
+   * column values for the type's extension table.  The returned object MUST NOT
+   * include `id` — that is injected by the upsert helper in db-helpers.ts.
+   *
+   * `cycleForNode` is the resolved cycle number for the node (from the base
+   * nodes row); it is needed by a few types (finding, document_artifacts) that
+   * store a cycle column in the extension table.
+   *
+   * Returns null when the type has no extension table (extensionTable === null).
+   * In that case writer.ts skips the extension-table upsert entirely.
+   */
+  buildRow: (props: Record<string, unknown>, cycleForNode: number | null) => Record<string, unknown> | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,6 +102,201 @@ export interface NodeTypeSpec {
 // compile-time safety guarantee: if a new NodeType is added to adapter.ts
 // without a corresponding entry here, tsc emits a type error.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// buildRow helpers — shared coercion utilities (mirrors indexer.ts conventions)
+// ---------------------------------------------------------------------------
+
+function toStr(v: unknown): string | null {
+  return typeof v === "string" ? v : v == null ? null : String(v);
+}
+
+function toNum(v: unknown): number | null {
+  if (typeof v === "number") return v;
+  if (v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function toJson(v: unknown): string | null {
+  if (v == null) return null;
+  if (typeof v === "string") return v;
+  return JSON.stringify(v);
+}
+
+// ---------------------------------------------------------------------------
+// buildRow implementations — one per type that has an extension table
+// ---------------------------------------------------------------------------
+
+function buildRowWorkItem(props: Record<string, unknown>): Record<string, unknown> {
+  return {
+    title: toStr(props.title) ?? "",
+    complexity: toStr(props.complexity),
+    scope: toJson(props.scope),
+    depends: toJson(props.depends),
+    blocks: toJson(props.blocks),
+    criteria: toJson(props.criteria),
+    module: null,
+    domain: toStr(props.domain),
+    phase: toStr(props.phase),
+    notes: toStr(props.notes),
+    work_item_type: toStr(props.work_item_type) ?? "feature",
+    resolution: toStr(props.resolution),
+  };
+}
+
+function buildRowFinding(props: Record<string, unknown>, cycleForNode: number | null): Record<string, unknown> {
+  return {
+    severity: toStr(props.severity) ?? "",
+    work_item: toStr(props.work_item) ?? "",
+    file_refs: toStr(props.file_refs),
+    verdict: toStr(props.verdict) ?? "",
+    cycle: toNum(props.cycle) ?? cycleForNode ?? 0,
+    reviewer: toStr(props.reviewer) ?? "",
+    description: toStr(props.description),
+    suggestion: toStr(props.suggestion),
+    addressed_by: toStr(props.addressed_by),
+    title: toStr(props.title),
+  };
+}
+
+function buildRowDomainPolicy(props: Record<string, unknown>): Record<string, unknown> {
+  return {
+    domain: toStr(props.domain) ?? "",
+    derived_from: toJson(props.derived_from),
+    established: toStr(props.established),
+    amended: toStr(props.amended),
+    amended_by: toStr(props.amended_by),
+    description: toStr(props.description),
+  };
+}
+
+function buildRowDomainDecision(props: Record<string, unknown>): Record<string, unknown> {
+  return {
+    domain: toStr(props.domain) ?? "",
+    cycle: toNum(props.cycle),
+    supersedes: toStr(props.supersedes),
+    description: toStr(props.description),
+    rationale: toStr(props.rationale),
+    title: toStr(props.title),
+    source: toStr(props.source),
+  };
+}
+
+function buildRowDomainQuestion(props: Record<string, unknown>): Record<string, unknown> {
+  return {
+    domain: toStr(props.domain) ?? "",
+    impact: toStr(props.impact),
+    source: toStr(props.source),
+    resolution: toStr(props.resolution),
+    resolved_in: toNum(props.resolved_in),
+    description: toStr(props.description),
+    addressed_by: toStr(props.addressed_by),
+  };
+}
+
+function buildRowGuidingPrinciple(props: Record<string, unknown>): Record<string, unknown> {
+  return {
+    name: toStr(props.name) ?? "",
+    description: toStr(props.description),
+    amendment_history: toJson(props.amendment_history),
+  };
+}
+
+function buildRowConstraint(props: Record<string, unknown>): Record<string, unknown> {
+  return {
+    category: toStr(props.category) ?? "",
+    description: toStr(props.description),
+  };
+}
+
+function buildRowModuleSpec(props: Record<string, unknown>): Record<string, unknown> {
+  return {
+    name: toStr(props.name) ?? "",
+    scope: toStr(props.scope),
+    provides: toJson(props.provides),
+    requires: toJson(props.requires),
+    boundary_rules: toJson(props.boundary_rules),
+  };
+}
+
+function buildRowResearchFinding(props: Record<string, unknown>): Record<string, unknown> {
+  return {
+    topic: toStr(props.topic) ?? "",
+    date: toStr(props.date),
+    content: toStr(props.content),
+    sources: toJson(props.sources),
+  };
+}
+
+function buildRowJournalEntry(props: Record<string, unknown>): Record<string, unknown> {
+  return {
+    phase: toStr(props.phase),
+    date: toStr(props.date),
+    title: toStr(props.title),
+    work_item: toStr(props.work_item),
+    content: toStr(props.content),
+  };
+}
+
+function buildRowInterviewQuestion(props: Record<string, unknown>): Record<string, unknown> {
+  return {
+    interview_id: toStr(props.interview_id) ?? "",
+    question: toStr(props.question) ?? "",
+    answer: toStr(props.answer) ?? "",
+    domain: toStr(props.domain),
+    seq: toNum(props.seq) ?? 0,
+  };
+}
+
+function buildRowProxyHumanDecision(props: Record<string, unknown>): Record<string, unknown> {
+  return {
+    cycle: toNum(props.cycle) ?? 0,
+    trigger: toStr(props.trigger) ?? "",
+    triggered_by: toJson(props.triggered_by),
+    decision: toStr(props.decision) ?? "",
+    rationale: toStr(props.rationale),
+    timestamp: toStr(props.timestamp) ?? new Date().toISOString(),
+    status: toStr(props.status) ?? "resolved",
+  };
+}
+
+function buildRowProject(props: Record<string, unknown>): Record<string, unknown> {
+  return {
+    name: toStr(props.name),
+    description: toStr(props.description),
+    intent: toStr(props.intent) ?? "",
+    scope_boundary: toJson(props.scope_boundary),
+    success_criteria: toJson(props.success_criteria),
+    appetite: toNum(props.appetite),
+    steering: toStr(props.steering),
+    horizon: toJson(props.horizon),
+    status: toStr(props.status) ?? "active",
+    current_phase_id: toStr(props.current_phase_id),
+  };
+}
+
+function buildRowPhase(props: Record<string, unknown>): Record<string, unknown> {
+  return {
+    name: toStr(props.name),
+    description: toStr(props.description),
+    project: toStr(props.project) ?? "",
+    phase_type: toStr(props.phase_type) ?? "implementation",
+    intent: toStr(props.intent) ?? "",
+    steering: toStr(props.steering),
+    status: toStr(props.status) ?? "pending",
+    work_items: toJson(props.work_items),
+    completed_date: toStr(props.completed_date),
+  };
+}
+
+function buildRowDocumentArtifact(props: Record<string, unknown>, cycleForNode: number | null): Record<string, unknown> {
+  return {
+    title: toStr(props.title),
+    cycle: toNum(props.cycle) ?? cycleForNode,
+    content: typeof props.content === "string" ? props.content : JSON.stringify(props),
+  };
+}
 
 export const NODE_TYPE_REGISTRY = {
   // -------------------------------------------------------------------------
@@ -99,6 +310,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: 3,
     summarySelector: "e.title",
     isQueryable: true,
+    buildRow: (props, _cycleForNode) => buildRowWorkItem(props),
   },
 
   finding: {
@@ -108,6 +320,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: 3,
     summarySelector: "e.severity || ' — ' || e.verdict || ' by ' || e.reviewer",
     isQueryable: true,
+    buildRow: (props, cycleForNode) => buildRowFinding(props, cycleForNode),
   },
 
   domain_policy: {
@@ -117,6 +330,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: 2,
     summarySelector: "e.description",
     isQueryable: true,
+    buildRow: (props, _cycleForNode) => buildRowDomainPolicy(props),
   },
 
   domain_decision: {
@@ -126,6 +340,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: 2,
     summarySelector: "e.description",
     isQueryable: true,
+    buildRow: (props, _cycleForNode) => buildRowDomainDecision(props),
   },
 
   domain_question: {
@@ -135,6 +350,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: 2,
     summarySelector: "e.description",
     isQueryable: true,
+    buildRow: (props, _cycleForNode) => buildRowDomainQuestion(props),
   },
 
   guiding_principle: {
@@ -144,6 +360,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: 2,
     summarySelector: "e.name",
     isQueryable: true,
+    buildRow: (props, _cycleForNode) => buildRowGuidingPrinciple(props),
   },
 
   constraint: {
@@ -153,6 +370,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: 2,
     summarySelector: "e.category || ': ' || e.description",
     isQueryable: true,
+    buildRow: (props, _cycleForNode) => buildRowConstraint(props),
   },
 
   module_spec: {
@@ -162,6 +380,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: null,
     summarySelector: "e.name",
     isQueryable: true,
+    buildRow: (props, _cycleForNode) => buildRowModuleSpec(props),
   },
 
   research_finding: {
@@ -171,6 +390,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: null,
     summarySelector: "e.topic",
     isQueryable: true,
+    buildRow: (props, _cycleForNode) => buildRowResearchFinding(props),
   },
 
   journal_entry: {
@@ -180,6 +400,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: null,
     summarySelector: "'[' || e.phase || '] ' || e.title",
     isQueryable: true,
+    buildRow: (props, _cycleForNode) => buildRowJournalEntry(props),
   },
 
   interview_question: {
@@ -189,6 +410,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: null,
     summarySelector: "e.interview_id || ': ' || e.question",
     isQueryable: true,
+    buildRow: (props, _cycleForNode) => buildRowInterviewQuestion(props),
   },
 
   proxy_human_decision: {
@@ -198,6 +420,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: 2,
     summarySelector: "e.trigger || ' → ' || e.decision || ' [' || e.status || ']'",
     isQueryable: true,
+    buildRow: (props, _cycleForNode) => buildRowProxyHumanDecision(props),
   },
 
   project: {
@@ -207,6 +430,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: 3,
     summarySelector: "COALESCE(e.name, SUBSTR(e.intent, 1, 40))",
     isQueryable: true,
+    buildRow: (props, _cycleForNode) => buildRowProject(props),
   },
 
   phase: {
@@ -216,6 +440,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: 3,
     summarySelector: "COALESCE(e.name, e.phase_type || ': ' || SUBSTR(e.intent, 1, 40))",
     isQueryable: true,
+    buildRow: (props, _cycleForNode) => buildRowPhase(props),
   },
 
   // -------------------------------------------------------------------------
@@ -231,6 +456,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: null,
     summarySelector: "COALESCE(e.title, n.type)",
     isQueryable: true,
+    buildRow: (props, cycleForNode) => buildRowDocumentArtifact(props, cycleForNode),
   },
 
   cycle_summary: {
@@ -240,6 +466,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: null,
     summarySelector: "COALESCE(e.title, n.type)",
     isQueryable: true,
+    buildRow: (props, cycleForNode) => buildRowDocumentArtifact(props, cycleForNode),
   },
 
   review_manifest: {
@@ -249,6 +476,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: null,
     summarySelector: "COALESCE(e.title, n.type)",
     isQueryable: true,
+    buildRow: (props, cycleForNode) => buildRowDocumentArtifact(props, cycleForNode),
   },
 
   review_output: {
@@ -258,6 +486,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: null,
     summarySelector: "COALESCE(e.title, n.type)",
     isQueryable: true,
+    buildRow: (props, cycleForNode) => buildRowDocumentArtifact(props, cycleForNode),
   },
 
   architecture: {
@@ -267,6 +496,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: null,
     summarySelector: "COALESCE(e.title, n.type)",
     isQueryable: true,
+    buildRow: (props, cycleForNode) => buildRowDocumentArtifact(props, cycleForNode),
   },
 
   overview: {
@@ -276,6 +506,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: null,
     summarySelector: "COALESCE(e.title, n.type)",
     isQueryable: true,
+    buildRow: (props, cycleForNode) => buildRowDocumentArtifact(props, cycleForNode),
   },
 
   execution_strategy: {
@@ -285,6 +516,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: null,
     summarySelector: "COALESCE(e.title, n.type)",
     isQueryable: true,
+    buildRow: (props, cycleForNode) => buildRowDocumentArtifact(props, cycleForNode),
   },
 
   guiding_principles: {
@@ -294,6 +526,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: null,
     summarySelector: "COALESCE(e.title, n.type)",
     isQueryable: true,
+    buildRow: (props, cycleForNode) => buildRowDocumentArtifact(props, cycleForNode),
   },
 
   constraints: {
@@ -303,6 +536,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: null,
     summarySelector: "COALESCE(e.title, n.type)",
     isQueryable: true,
+    buildRow: (props, cycleForNode) => buildRowDocumentArtifact(props, cycleForNode),
   },
 
   research: {
@@ -312,6 +546,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: null,
     summarySelector: "COALESCE(e.title, n.type)",
     isQueryable: true,
+    buildRow: (props, cycleForNode) => buildRowDocumentArtifact(props, cycleForNode),
   },
 
   interview: {
@@ -321,6 +556,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: null,
     summarySelector: "COALESCE(e.title, n.type)",
     isQueryable: true,
+    buildRow: (props, cycleForNode) => buildRowDocumentArtifact(props, cycleForNode),
   },
 
   domain_index: {
@@ -330,6 +566,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: null,
     summarySelector: "COALESCE(e.title, n.type)",
     isQueryable: true,
+    buildRow: (props, cycleForNode) => buildRowDocumentArtifact(props, cycleForNode),
   },
 
   // -------------------------------------------------------------------------
@@ -354,6 +591,7 @@ export const NODE_TYPE_REGISTRY = {
     idPadWidth: null,
     summarySelector: null,
     isQueryable: false,
+    buildRow: (_props, _cycleForNode) => null,
   },
 } as const satisfies Record<NodeType, NodeTypeSpec>;
 

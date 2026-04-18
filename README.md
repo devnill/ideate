@@ -65,7 +65,6 @@ Or let it run autonomously until convergence:
 | `/ideate:triage` | Quick work item intake — bug reports, feature requests, chores |
 | `/ideate:status` | Project status views — workspace, project, or phase perspective |
 | `/ideate:settings` | Interactive configuration for agent budgets, model overrides, and PPR weights |
-| `/ideate:report` | Generate project reports with statistics, diagrams, and change summaries |
 
 ---
 
@@ -505,7 +504,7 @@ Migrates an existing artifact directory to the v3 YAML-backed structure.
 
 The rationale for the cycles/domain separation, interview structure, and the GP → domain policy derivation pattern is documented in `.ideate/steering/`.
 
-For comprehensive usage documentation covering all 10 skills, project/phase management, work item types, and the full SDLC loop, see [GUIDE.md](GUIDE.md).
+For comprehensive usage documentation covering all 9 skills, project/phase management, work item types, and the full SDLC loop, see [GUIDE.md](GUIDE.md).
 
 For deep technical documentation covering the MCP artifact server schema, indexer pipeline, tool architecture, and graph model, see [ARCHITECTURE.md](ARCHITECTURE.md).
 

@@ -9,8 +9,7 @@
  *   imported from server.ts — the same code that runs in production.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import Database from "better-sqlite3";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -21,7 +20,6 @@ import {
   handleBootstrapDormant,
   routeToolCall,
   createDormantState,
-  ServerState,
   HandleToolFn,
 } from "../server.js";
 import { IDEATE_SUBDIRS, createIdeateDir } from "../config.js";
@@ -313,7 +311,7 @@ describe("initServer failure", () => {
     // Actually, rebuildIndex won't throw on bad YAML (it logs and skips).
     // Instead, make the directory read-only after DB creation to force a
     // filesystem error during walkDir inside rebuildIndex.
-    const ideateDir = createIdeateDir(tmpDir);
+    createIdeateDir(tmpDir);
 
     // Sabotage: remove the directory contents after config is written
     // so walkDir can't enumerate. Actually, let's just verify the

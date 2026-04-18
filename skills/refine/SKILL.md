@@ -446,7 +446,13 @@ After all artifacts are written, present a summary to the user covering:
 
 Format the summary for readability. Use a table for work items if there are more than three.
 
-After presenting the summary, the user can proceed to `/ideate:execute` to build the changes.
+After presenting the summary, call `ideate_emit_event` with:
+- event: "plan.complete"
+- variables: { "WORK_ITEM_COUNT": "{new_work_item_count}", "CYCLE": "{cycle_number}" }
+
+This call is best-effort — if it fails, continue without interruption.
+
+After the event is emitted, the user can proceed to `/ideate:execute` to build the changes.
 
 ---
 

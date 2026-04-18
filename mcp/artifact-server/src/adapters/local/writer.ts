@@ -20,44 +20,19 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type Database from "better-sqlite3";
-import { eq, inArray, and } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { detectCycles } from "../../indexer.js";
 import { estimateTokens } from "../../token-utils.js";
 import * as dbSchema from "../../db.js";
 import {
   type DrizzleDb,
   type NodeRow,
-  type WorkItemRow,
   type JournalEntryRow,
-  type DomainPolicyRow,
-  type DomainDecisionRow,
-  type DomainQuestionRow,
-  type ProxyHumanDecisionRow,
-  type GuidingPrincipleRow,
-  type ConstraintRow,
-  type DocumentArtifactRow,
-  type ResearchFindingRow,
-  type ModuleSpecRow,
-  type FindingRow,
-  type InterviewQuestionRow,
-  type ProjectRow,
-  type PhaseRow,
+  type WorkItemRow,
   upsertNode,
   upsertWorkItem,
   upsertJournalEntry,
-  upsertDomainPolicy,
-  upsertDomainDecision,
-  upsertDomainQuestion,
-  upsertProxyHumanDecision,
-  upsertGuidingPrinciple,
-  upsertConstraint,
-  upsertDocumentArtifact,
-  upsertResearchFinding,
-  upsertModuleSpec,
-  upsertFinding,
-  upsertInterviewQuestion,
-  upsertProject,
-  upsertPhase as upsertPhaseRow,
+  upsertExtensionRow,
   insertEdge,
   computeArtifactHash,
 } from "../../db-helpers.js";
@@ -76,6 +51,7 @@ import type {
 import { ValidationError, StorageAdapterError } from "../../adapter.js";
 import { CYCLE_SCOPED_TYPES } from "../../validating.js";
 import { log } from "../../logger.js";
+import { NODE_TYPE_REGISTRY } from "../../node-type-registry.js";
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -152,7 +128,11 @@ export function resolveArtifactPath(ideateDir: string, type: string, id: string,
 }
 
 // ---------------------------------------------------------------------------
-// Type-specific SQLite upsert dispatch (extracted from handleWriteArtifact)
+// Type-specific SQLite upsert dispatch — registry-driven
+//
+// Replaces the former 390-line if/else chain.  Each node type's buildRow
+// function lives in NODE_TYPE_REGISTRY (node-type-registry.ts); this function
+// is purely dispatch + edge side-effects.
 // ---------------------------------------------------------------------------
 
 function upsertExtensionTableRow(
@@ -162,227 +142,36 @@ function upsertExtensionTableRow(
   content: Record<string, unknown>,
   cycleForNode: number | null
 ): void {
-  if (type === "domain_policy") {
-    const policyRow: DomainPolicyRow = {
-      id,
-      domain: (content.domain as string) ?? "",
-      derived_from: content.derived_from ? JSON.stringify(content.derived_from) : null,
-      established: (content.established as string | null) ?? null,
-      amended: (content.amended as string | null) ?? null,
-      amended_by: (content.amended_by as string | null) ?? null,
-      description: (content.description as string | null) ?? null,
-    };
-    upsertDomainPolicy(drizzleDb, policyRow);
-  } else if (type === "domain_decision") {
-    const decisionRow: DomainDecisionRow = {
-      id,
-      domain: (content.domain as string) ?? "",
-      cycle: (content.cycle as number | null) ?? null,
-      supersedes: (content.supersedes as string | null) ?? null,
-      description: (content.description as string | null) ?? null,
-      rationale: (content.rationale as string | null) ?? null,
-      title: (content.title as string | null) ?? null,
-      source: (content.source as string | null) ?? null,
-    };
-    upsertDomainDecision(drizzleDb, decisionRow);
-  } else if (type === "domain_question") {
-    const questionRow: DomainQuestionRow = {
-      id,
-      domain: (content.domain as string) ?? "",
-      impact: (content.impact as string | null) ?? null,
-      source: (content.source as string | null) ?? null,
-      resolution: (content.resolution as string | null) ?? null,
-      resolved_in: (content.resolved_in as number | null) ?? null,
-      description: (content.description as string | null) ?? null,
-      addressed_by: (content.addressed_by as string | null) ?? null,
-    };
-    upsertDomainQuestion(drizzleDb, questionRow);
-  } else if (type === "proxy_human_decision") {
-    const phDecisionRow: ProxyHumanDecisionRow = {
-      id,
-      cycle: (content.cycle as number) ?? 0,
-      trigger: (content.trigger as string) ?? "",
-      triggered_by: content.triggered_by ? JSON.stringify(content.triggered_by) : null,
-      decision: (content.decision as string) ?? "",
-      rationale: (content.rationale as string | null) ?? null,
-      timestamp: (content.timestamp as string) ?? new Date().toISOString(),
-      status: (content.status as string) ?? "resolved",
-    };
-    upsertProxyHumanDecision(drizzleDb, phDecisionRow);
+  const spec = NODE_TYPE_REGISTRY[type as keyof typeof NODE_TYPE_REGISTRY];
+  if (!spec || !spec.extensionTableName) {
+    // Types without an extension table (e.g. autopilot_state) — no upsert needed.
+    return;
+  }
 
-    // Insert triggered_by edges
+  const row = spec.buildRow(content, cycleForNode);
+  if (row === null) return;
+
+  upsertExtensionRow(drizzleDb, spec.extensionTableName, id, row);
+
+  // Edge side-effects for types that embed relationship arrays in YAML.
+  // These mirror the edge-insertion logic the old if/else chain performed inline.
+  if (type === "work_item") {
+    if (content.depends && Array.isArray(content.depends)) {
+      for (const dep of content.depends as string[]) {
+        insertEdge(drizzleDb, { source_id: id, target_id: dep, edge_type: "depends_on", props: null });
+      }
+    }
+    if (content.blocks && Array.isArray(content.blocks)) {
+      for (const blocked of content.blocks as string[]) {
+        insertEdge(drizzleDb, { source_id: id, target_id: blocked, edge_type: "blocks", props: null });
+      }
+    }
+  } else if (type === "proxy_human_decision") {
     if (content.triggered_by && Array.isArray(content.triggered_by)) {
       for (const ref of content.triggered_by as Array<{ type: string; id: string }>) {
         if (ref && ref.id) {
-          insertEdge(drizzleDb, {
-            source_id: id,
-            target_id: ref.id,
-            edge_type: "triggered_by",
-            props: null,
-          });
+          insertEdge(drizzleDb, { source_id: id, target_id: ref.id, edge_type: "triggered_by", props: null });
         }
-      }
-    }
-  } else if (type === "guiding_principle") {
-    const principleRow: GuidingPrincipleRow = {
-      id,
-      name: (content.name as string) ?? "",
-      description: (content.description as string | null) ?? null,
-      amendment_history: content.amendment_history ? JSON.stringify(content.amendment_history) : null,
-    };
-    upsertGuidingPrinciple(drizzleDb, principleRow);
-  } else if (type === "constraint") {
-    const constraintRow: ConstraintRow = {
-      id,
-      category: (content.category as string) ?? "",
-      description: (content.description as string | null) ?? null,
-    };
-    upsertConstraint(drizzleDb, constraintRow);
-  } else if (
-    type === "overview" ||
-    type === "execution_strategy" ||
-    type === "architecture" ||
-    type === "cycle_summary" ||
-    type === "review_output" ||
-    type === "decision_log" ||
-    type === "review_manifest" ||
-    type === "guiding_principles" ||
-    type === "constraints" ||
-    type === "research" ||
-    type === "interview" ||
-    type === "domain_index"
-  ) {
-    const docRow: DocumentArtifactRow = {
-      id,
-      title: (content.title as string | null) ?? null,
-      cycle: (content.cycle as number | null) ?? cycleForNode,
-      content: typeof content.content === "string" ? content.content : JSON.stringify(content),
-    };
-    upsertDocumentArtifact(drizzleDb, docRow);
-  } else if (type === "research_finding") {
-    const rfRow: ResearchFindingRow = {
-      id,
-      topic: (content.topic as string) ?? "",
-      date: (content.date as string | null) ?? null,
-      content: (content.content as string | null) ?? null,
-      sources: content.sources ? JSON.stringify(content.sources) : null,
-    };
-    upsertResearchFinding(drizzleDb, rfRow);
-  } else if (type === "module_spec") {
-    const msRow: ModuleSpecRow = {
-      id,
-      name: (content.name as string) ?? "",
-      scope: (content.scope as string | null) ?? null,
-      provides: content.provides ? JSON.stringify(content.provides) : null,
-      requires: content.requires ? JSON.stringify(content.requires) : null,
-      boundary_rules: content.boundary_rules ? JSON.stringify(content.boundary_rules) : null,
-    };
-    upsertModuleSpec(drizzleDb, msRow);
-  } else if (type === "finding") {
-    const findingRow: FindingRow = {
-      id,
-      severity: (content.severity as string) ?? "",
-      work_item: (content.work_item as string) ?? "",
-      file_refs: (content.file_refs as string | null) ?? null,
-      verdict: (content.verdict as string) ?? "",
-      cycle: (content.cycle as number) ?? cycleForNode ?? 0,
-      reviewer: (content.reviewer as string) ?? "",
-      description: (content.description as string | null) ?? null,
-      suggestion: (content.suggestion as string | null) ?? null,
-      addressed_by: (content.addressed_by as string | null) ?? null,
-      title: (content.title as string | null) ?? null,
-    };
-    upsertFinding(drizzleDb, findingRow);
-  } else if (type === "interview_question") {
-    const iqRow: InterviewQuestionRow = {
-      id,
-      interview_id: (content.interview_id as string) ?? "",
-      question: (content.question as string) ?? "",
-      answer: (content.answer as string) ?? "",
-      domain: (content.domain as string | null) ?? null,
-      seq: (content.seq as number) ?? 0,
-    };
-    upsertInterviewQuestion(drizzleDb, iqRow);
-  } else if (type === "project") {
-    const projRow: ProjectRow = {
-      id,
-      name: (content.name as string | null) ?? null,
-      description: (content.description as string | null) ?? null,
-      intent: (content.intent as string) ?? "",
-      scope_boundary: content.scope_boundary ? JSON.stringify(content.scope_boundary) : null,
-      success_criteria: content.success_criteria ? JSON.stringify(content.success_criteria) : null,
-      appetite: (content.appetite as number | null) ?? null,
-      steering: (content.steering as string | null) ?? null,
-      horizon: content.horizon ? JSON.stringify(content.horizon) : null,
-      status: (content.status as string) ?? "active",
-      current_phase_id: (content.current_phase_id as string | null) ?? null,
-    };
-    upsertProject(drizzleDb, projRow);
-  } else if (type === "phase") {
-    const phaseRow: PhaseRow = {
-      id,
-      name: (content.name as string | null) ?? null,
-      description: (content.description as string | null) ?? null,
-      project: (content.project as string) ?? "",
-      phase_type: (content.phase_type as string) ?? "implementation",
-      intent: (content.intent as string) ?? "",
-      steering: (content.steering as string | null) ?? null,
-      status: (content.status as string) ?? "pending",
-      work_items: content.work_items ? JSON.stringify(content.work_items) : null,
-      completed_date: (content.completed_date as string | null) ?? null,
-    };
-    upsertPhaseRow(drizzleDb, phaseRow);
-  }
-  // journal_entry and work_item are handled separately (handleAppendJournal /
-  // handleWriteWorkItems routes), but they can also come through putNode.
-  else if (type === "journal_entry") {
-    const journalRow: JournalEntryRow = {
-      id,
-      phase: (content.phase as string | null) ?? null,
-      date: (content.date as string | null) ?? null,
-      title: (content.title as string | null) ?? null,
-      work_item: (content.work_item as string | null) ?? null,
-      content: (content.content as string | null) ?? null,
-    };
-    upsertJournalEntry(drizzleDb, journalRow);
-  } else if (type === "work_item") {
-    const wiRow: WorkItemRow = {
-      id,
-      title: (content.title as string) ?? "",
-      complexity: (content.complexity as string | null) ?? null,
-      scope: content.scope ? JSON.stringify(content.scope) : null,
-      depends: content.depends ? JSON.stringify(content.depends) : null,
-      blocks: content.blocks ? JSON.stringify(content.blocks) : null,
-      criteria: content.criteria ? JSON.stringify(content.criteria) : null,
-      module: null,
-      domain: (content.domain as string | null) ?? null,
-      phase: (content.phase as string | null) ?? null,
-      notes: (content.notes as string | null) ?? null,
-      work_item_type: (content.work_item_type as string | null) ?? "feature",
-      resolution: (content.resolution as string | null) ?? null,
-    };
-    upsertWorkItem(drizzleDb, wiRow);
-
-    // Insert dependency edges
-    if (content.depends && Array.isArray(content.depends)) {
-      for (const dep of content.depends as string[]) {
-        insertEdge(drizzleDb, {
-          source_id: id,
-          target_id: dep,
-          edge_type: "depends_on",
-          props: null,
-        });
-      }
-    }
-    // Insert blocks edges
-    if (content.blocks && Array.isArray(content.blocks)) {
-      for (const blocked of content.blocks as string[]) {
-        insertEdge(drizzleDb, {
-          source_id: id,
-          target_id: blocked,
-          edge_type: "blocks",
-          props: null,
-        });
       }
     }
   }
@@ -1039,6 +828,21 @@ export class LocalWriterAdapter {
     for (const node of workItemNodesResolved) {
       const deps = new Set<string>((node.properties.depends as string[] | undefined) ?? []);
       dependsGraph.set(node.resolvedId, deps);
+    }
+
+    // Seed dependsGraph from existing SQLite depends_on edges so that items
+    // linked via a pre-existing node (not in the current batch) are not
+    // false-flagged as scope collisions.
+    if (workItemNodesResolved.length > 0) {
+      const itemIds = workItemNodesResolved.map(n => n.resolvedId);
+      const edgePlaceholders = itemIds.map(() => "?").join(", ");
+      const existingEdges = this.db.prepare(
+        `SELECT source_id, target_id FROM edges WHERE edge_type = 'depends_on' AND (source_id IN (${edgePlaceholders}) OR target_id IN (${edgePlaceholders}))`
+      ).all(...itemIds, ...itemIds) as Array<{ source_id: string; target_id: string }>;
+      for (const edge of existingEdges) {
+        if (!dependsGraph.has(edge.source_id)) dependsGraph.set(edge.source_id, new Set());
+        dependsGraph.get(edge.source_id)!.add(edge.target_id);
+      }
     }
 
     function isLinkedByDepends(a: string, b: string): boolean {

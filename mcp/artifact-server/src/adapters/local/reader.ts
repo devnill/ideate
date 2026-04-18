@@ -654,9 +654,6 @@ export class LocalReaderAdapter {
       // Cycle lives on extension tables; handled via JOIN when type is known
     }
 
-    const whereClause =
-      whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
-
     let groupExpr: string;
     let joinClause = "";
 

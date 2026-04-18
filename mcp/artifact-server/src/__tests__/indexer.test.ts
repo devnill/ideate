@@ -8,7 +8,7 @@ import { createHash } from "crypto";
 import { stringify } from "yaml";
 import { createSchema } from "../schema.js";
 import * as dbSchema from "../db.js";
-import { rebuildIndex, detectCycles, indexFiles, removeFiles, deriveJournalEntryCycleEdges, deriveJournalEntryEdges, MAX_DEPENDENCY_NODES, MAX_DEPENDENCY_EDGES, readAndPrepare, upsertPrepared, type PreparedNode } from "../indexer.js";
+import { rebuildIndex, detectCycles, indexFiles, removeFiles, deriveJournalEntryCycleEdges, MAX_DEPENDENCY_NODES, MAX_DEPENDENCY_EDGES, readAndPrepare, upsertPrepared } from "../indexer.js";
 import { computeArtifactHash, upsertNode, upsertJournalEntry, upsertDocumentArtifact } from "../db-helpers.js";
 
 // ---------------------------------------------------------------------------
@@ -1634,7 +1634,7 @@ describe("rebuildIndex — content_hash excludes metadata fields", () => {
     const db = freshDb();
     const ideateDir = makeIdeateDir(tmpDir);
 
-    const filePath = writeYaml(
+    writeYaml(
       path.join(ideateDir, "work-items"),
       "WI-998.yaml",
       minimalWorkItem({ id: "WI-998", title: "Stable hash test" })
@@ -2698,13 +2698,7 @@ describe("registry source_types enforcement — derived_from", () => {
 
     writeYaml(principlesDir, "GP-01.yaml", gpYaml);
 
-    // A work_item with derived_from — this type is NOT in derived_from.source_types
-    const wiYaml = minimalWorkItem({
-      id: "WI-ROGUE-001",
-      title: "Rogue work item",
-      // Add derived_from as a raw YAML field — minimalWorkItem does not support it natively,
-      // so we build the YAML manually below.
-    });
+    // A work_item with derived_from — this type is NOT in derived_from.source_types.
     // Build manually since minimalWorkItem doesn't support arbitrary extra fields:
     const wiYamlFull = [
       `id: "WI-ROGUE-001"`,

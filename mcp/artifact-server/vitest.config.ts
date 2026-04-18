@@ -9,7 +9,6 @@ export default defineConfig({
   },
   test: {
     testTimeout: 10_000,
-    forceExit: true,
     include: ["src/__tests__/**/*.test.ts", "tests/**/*.test.ts"],
   },
 });

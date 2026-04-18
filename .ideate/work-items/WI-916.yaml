@@ -50,9 +50,9 @@ notes: |-
 
   - Must not break Edit/Write on source files outside .ideate/ (workers need those for normal work).
   - GP-14 compliance: any domain policy amendment goes through ideate_write_artifact.
-resolution: null
-status: pending
+resolution: ".claude/settings.json created with permission deny rules: Edit(**/.ideate/**) and Write(**/.ideate/**). agents/worker.md disallowedTools block removed; body text updated to cite settings.json as enforcement mechanism. P-94 domain policy updated via ideate_write_artifact to cite settings.json location. Criterion 2 (runtime smoke test of permission denial) marked unverifiable — requires live Claude Code session."
+status: done
 cycle_created: 83
-cycle_modified: null
-content_hash: e6d651bdad7b5e9198d8956909c8d98d2fafe412901a2b8693f5ab618460ae67
-token_count: 545
+cycle_modified: 27
+content_hash: 5c497e84d9e4944e1c46e4095124e95804db5d8c76b89743809778c7bef359f6
+token_count: 670

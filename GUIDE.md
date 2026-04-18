@@ -290,18 +290,6 @@ A **cycle** is one pass through execute → review → (refine if needed). Each 
 
 ---
 
-## Reporting
-
-```
-/ideate:report ./reports/    # Generate markdown report
-/ideate:report ./reports/ --pdf  # Generate markdown + PDF
-/ideate:report ./reports/ --cycles 3-7  # Scope to cycles 3 through 7
-```
-
-Generates project reports with statistics, diagrams, and change summaries. Output is markdown with embedded mermaid diagrams.
-
----
-
 ## Hooks
 
 Hooks let you run shell commands or inject prompts in response to lifecycle events. Configure them in `.ideate/hooks.json`:
@@ -365,4 +353,3 @@ Set `"enabled": false` on any hook to skip it without removing the configuration
 | Run the full loop autonomously | `/ideate:autopilot` |
 | Check project status | `/ideate:status` |
 | Adjust configuration | `/ideate:settings` |
-| Generate a report | `/ideate:report` |

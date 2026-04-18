@@ -15,13 +15,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   StorageAdapter,
-  Node,
   NodeType,
   MutateNodeInput,
-  MutateNodeResult,
   UpdateNodeInput,
-  UpdateNodeResult,
-  DeleteNodeResult,
   Edge,
   TraversalOptions,
   TraversalResult,
@@ -53,17 +49,6 @@ interface MockAdapter extends StorageAdapter {
 
 function createMockAdapter(): MockAdapter {
   const calls: MockCall[] = [];
-
-  const minimalNode: Node = {
-    id: "WI-001",
-    type: "work_item",
-    status: null,
-    cycle_created: null,
-    cycle_modified: null,
-    content_hash: "abc123",
-    token_count: null,
-    properties: {},
-  };
 
   const minimalQueryResult: QueryResult = {
     nodes: [],

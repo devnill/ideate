@@ -271,10 +271,10 @@ export function initServer(dir: string, state: ServerState): void {
         const yamlChanged = event.changed.filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
         const yamlDeleted = event.deleted.filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
         if (yamlChanged.length > 0) {
-          void state.ctx.adapter.indexFiles(yamlChanged);
+          state.ctx.adapter.indexFiles(yamlChanged).catch(err => log.error("watcher", "indexFiles failed", err));
         }
         if (yamlDeleted.length > 0) {
-          void state.ctx.adapter.removeFiles(yamlDeleted);
+          state.ctx.adapter.removeFiles(yamlDeleted).catch(err => log.error("watcher", "removeFiles failed", err));
         }
       } catch (err) {
         log.error("watcher", "incremental index failed", err);

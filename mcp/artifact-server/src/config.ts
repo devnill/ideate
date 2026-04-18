@@ -140,7 +140,6 @@ export function readIdeateConfig(dir: string): IdeateConfig | null {
     // .ideate/ directory IS the artifact dir
     return { artifactDir: path.join(dir, ".ideate") };
   } catch (err) {
-    const ts = new Date().toISOString();
     log.warn("config", `config.json exists at ${configPath} but failed to parse: ${(err as Error).message}`);
     return null;
   }
@@ -233,7 +232,6 @@ export function readRawConfig(ideateDir: string): IdeateConfigJson {
   try {
     return JSON.parse(readFileSync(configPath, "utf8")) as IdeateConfigJson;
   } catch (err) {
-    const ts = new Date().toISOString();
     log.warn("config", `config.json exists at ${configPath} but failed to parse: ${(err as Error).message}`);
     return { schema_version: CONFIG_SCHEMA_VERSION };
   }

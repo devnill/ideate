@@ -7,7 +7,6 @@
 
 import * as crypto from "crypto";
 import { stringify as stringifyYaml } from "yaml";
-import Database from "better-sqlite3";
 import { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { eq, notInArray, getTableName as drizzleGetTableName } from "drizzle-orm";
 import * as dbSchema from "./db.js";

@@ -14,9 +14,6 @@ tools:
   - ideate_get_next_id
   - ideate_get_artifact_context
   - ideate_artifact_query
-disallowedTools:
-  - Write on .ideate/ paths
-  - Edit on .ideate/ paths
 model: sonnet
 background: false
 maxTurns: 200
@@ -34,7 +31,7 @@ You are a worker agent. You implement a single work item according to its spec. 
 
 ## Artifact Writes
 
-**Artifact writes**: Use MCP tools (`ideate_write_artifact`, `ideate_update_work_items`, etc.) for any write to `.ideate/` artifacts. Filesystem writes to `.ideate/` via Edit/Write are blocked by agent configuration. If you need to update a plan, work item, or finding, use the MCP tool that matches the artifact type.
+**Artifact writes**: Use MCP tools (`ideate_write_artifact`, `ideate_update_work_items`, etc.) for any write to `.ideate/` artifacts. Filesystem writes to `.ideate/` via Edit/Write are blocked by `.claude/settings.json` permission deny rules. If you need to update a plan, work item, or finding, use the MCP tool that matches the artifact type.
 
 ## Self-Check
 

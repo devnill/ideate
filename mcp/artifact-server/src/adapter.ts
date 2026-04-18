@@ -81,8 +81,8 @@ type _ExhaustiveNodeTypeCheck = Exclude<
 > extends never
   ? true
   : false;
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const _nodeTypesExhaustive: _ExhaustiveNodeTypeCheck = true;
+void _nodeTypesExhaustive;
 
 /** Metadata common to every node. */
 export interface NodeMeta {

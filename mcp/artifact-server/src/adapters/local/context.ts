@@ -193,15 +193,15 @@ export class LocalContextAdapter {
     ]);
 
     const pprNodeRows: NodeRow[] = [];
-    for (const id of pprNodeIds) {
-      const row = this.db
+    if (pprNodeIds.size > 0) {
+      const pprIdArray = Array.from(pprNodeIds);
+      const placeholders = pprIdArray.map(() => "?").join(", ");
+      const rows = this.db
         .prepare(
-          `SELECT id, type, file_path, token_count, status FROM nodes WHERE id = ?`
+          `SELECT id, type, file_path, token_count, status FROM nodes WHERE id IN (${placeholders})`
         )
-        .get(id) as NodeRow | undefined;
-      if (row) {
-        pprNodeRows.push(row);
-      }
+        .all(...pprIdArray) as NodeRow[];
+      pprNodeRows.push(...rows);
     }
 
     // -----------------------------------------------------------------------

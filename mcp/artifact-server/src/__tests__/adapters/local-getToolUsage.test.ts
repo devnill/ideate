@@ -18,7 +18,7 @@ import * as dbSchema from "../../db.js";
 import type { DrizzleDb } from "../../db-helpers.js";
 import { insertToolUsage } from "../../db-helpers.js";
 import { LocalAdapter } from "../../adapters/local/index.js";
-import type { ToolUsageRow, ToolUsageInsert } from "../../adapter.js";
+import type { ToolUsageInsert } from "../../adapter.js";
 
 // ---------------------------------------------------------------------------
 // Setup / teardown
@@ -160,14 +160,6 @@ function insertAll(): void {
   for (const row of ALL_ROWS) {
     insertToolUsage(drizzleDb, row);
   }
-}
-
-// ---------------------------------------------------------------------------
-// Helper: extract comparable fields from returned rows (ignore auto-id)
-// ---------------------------------------------------------------------------
-
-function normalize(rows: ToolUsageRow[]): Omit<ToolUsageRow, "id">[] {
-  return rows.map(({ id: _id, ...rest }) => rest);
 }
 
 // ---------------------------------------------------------------------------

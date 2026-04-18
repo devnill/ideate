@@ -303,16 +303,6 @@ async function handlePhaseContext(
   ctx: ToolContext,
   nodeMeta: NodeMetaRow
 ): Promise<string> {
-  interface PhaseExtRow {
-    id: string;
-    project: string;
-    phase_type: string;
-    intent: string;
-    steering: string | null;
-    status: string;
-    work_items: string | null;
-  }
-
   interface WISummaryRow {
     id: string;
     title: string;

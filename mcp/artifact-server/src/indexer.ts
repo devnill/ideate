@@ -1,5 +1,4 @@
 import Database from "better-sqlite3";
-import { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { and, eq } from "drizzle-orm";
 import * as fs from "fs";
 import * as path from "path";
@@ -11,8 +10,6 @@ import { estimateTokens } from "./token-utils.js";
 import {
   type DrizzleDb,
   type NodeRow,
-  type EdgeRow,
-  type NodeFileRefRow,
   upsertNode,
   upsertExtensionRow,
   insertEdge,
@@ -95,7 +92,6 @@ function safeParseYaml(content: string, filePath: string, caller: string = "unkn
     return { parsed: parseYaml(content), errorMessage: null };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    const timestamp = new Date().toISOString();
     log.warn("indexer", `[${caller}] YAML parse error in ${filePath}: ${errMsg}`);
     return { parsed: null, errorMessage: errMsg };
   }

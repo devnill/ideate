@@ -10,7 +10,7 @@
  *        code INVALID_NODE_TYPE (not a plain Error).
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import fs from "fs";
@@ -671,6 +671,497 @@ describe("patchNode — post-write filesystem failure does not corrupt SQLite (W
     // SQLite should reflect the updated title (not the old one)
     const nodeRow = db.prepare(`SELECT id FROM nodes WHERE id = 'WI-100'`).get();
     expect(nodeRow).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WI-904 — registry-driven upsertExtensionTableRow roundtrip tests
+//
+// For each node type that has an extension table, putNode then getNode and
+// assert the extension-table columns returned in properties match the inputs.
+// This is the regression guard against the old if/else chain behavior.
+// ---------------------------------------------------------------------------
+
+describe("WI-904 — registry-driven extension table roundtrip", () => {
+  it("work_item: extension table row matches input properties", async () => {
+    await adapter.putNode({
+      id: "WI-RT-001",
+      type: "work_item",
+      properties: {
+        title: "Roundtrip work item",
+        complexity: "medium",
+        domain: "core",
+        phase: "PH-001",
+        notes: "some notes",
+        work_item_type: "bug",
+        resolution: null,
+      },
+    });
+    const node = await adapter.getNode("WI-RT-001");
+    expect(node).not.toBeNull();
+    expect(node!.properties.title).toBe("Roundtrip work item");
+    expect(node!.properties.complexity).toBe("medium");
+    expect(node!.properties.domain).toBe("core");
+    expect(node!.properties.work_item_type).toBe("bug");
+  });
+
+  it("finding: extension table row matches input properties", async () => {
+    fs.mkdirSync(path.join(ideateDir, "cycles", "001", "findings"), { recursive: true });
+    await adapter.putNode({
+      id: "F-001-001",
+      type: "finding",
+      cycle: 1,
+      properties: {
+        severity: "major",
+        work_item: "WI-001",
+        verdict: "fail",
+        cycle: 1,
+        reviewer: "agent-reviewer",
+        description: "Found a bug",
+        suggestion: "Fix it",
+        addressed_by: null,
+        title: "Bug finding",
+        status: "active",
+      },
+    });
+    const node = await adapter.getNode("F-001-001");
+    expect(node).not.toBeNull();
+    expect(node!.properties.severity).toBe("major");
+    expect(node!.properties.verdict).toBe("fail");
+    expect(node!.properties.reviewer).toBe("agent-reviewer");
+    expect(node!.properties.title).toBe("Bug finding");
+  });
+
+  it("domain_policy: extension table row matches input properties", async () => {
+    await adapter.putNode({
+      id: "P-01",
+      type: "domain_policy",
+      properties: {
+        domain: "workflow",
+        description: "Always write tests",
+        established: "2026-01-01",
+        amended: null,
+        amended_by: null,
+        derived_from: null,
+      },
+    });
+    const node = await adapter.getNode("P-01");
+    expect(node).not.toBeNull();
+    expect(node!.properties.domain).toBe("workflow");
+    expect(node!.properties.description).toBe("Always write tests");
+  });
+
+  it("domain_decision: extension table row matches input properties", async () => {
+    await adapter.putNode({
+      id: "D-01",
+      type: "domain_decision",
+      properties: {
+        domain: "artifact-structure",
+        title: "Use YAML",
+        description: "Artifacts stored as YAML",
+        rationale: "Human readable",
+        source: "GP-01",
+        cycle: 1,
+        supersedes: null,
+      },
+    });
+    const node = await adapter.getNode("D-01");
+    expect(node).not.toBeNull();
+    expect(node!.properties.domain).toBe("artifact-structure");
+    expect(node!.properties.title).toBe("Use YAML");
+    expect(node!.properties.rationale).toBe("Human readable");
+  });
+
+  it("domain_question: extension table row matches input properties", async () => {
+    await adapter.putNode({
+      id: "Q-01",
+      type: "domain_question",
+      properties: {
+        domain: "workflow",
+        description: "How to handle retries?",
+        impact: "high",
+        source: "GP-02",
+        resolution: null,
+        resolved_in: null,
+        addressed_by: null,
+      },
+    });
+    const node = await adapter.getNode("Q-01");
+    expect(node).not.toBeNull();
+    expect(node!.properties.domain).toBe("workflow");
+    expect(node!.properties.description).toBe("How to handle retries?");
+    expect(node!.properties.impact).toBe("high");
+  });
+
+  it("guiding_principle: extension table row matches input properties", async () => {
+    await adapter.putNode({
+      id: "GP-RT-01",
+      type: "guiding_principle",
+      properties: {
+        name: "Test everything",
+        description: "Every change should have tests",
+        amendment_history: null,
+      },
+    });
+    const node = await adapter.getNode("GP-RT-01");
+    expect(node).not.toBeNull();
+    expect(node!.properties.name).toBe("Test everything");
+    expect(node!.properties.description).toBe("Every change should have tests");
+  });
+
+  it("constraint: extension table row matches input properties", async () => {
+    await adapter.putNode({
+      id: "C-01",
+      type: "constraint",
+      properties: {
+        category: "technical",
+        description: "Must use TypeScript",
+      },
+    });
+    const node = await adapter.getNode("C-01");
+    expect(node).not.toBeNull();
+    expect(node!.properties.category).toBe("technical");
+    expect(node!.properties.description).toBe("Must use TypeScript");
+  });
+
+  it("research_finding: extension table row matches input properties", async () => {
+    await adapter.putNode({
+      id: "RF-roundtrip-001",
+      type: "research_finding",
+      properties: {
+        topic: "SQLite performance",
+        date: "2026-01-15",
+        content: "WAL mode is faster",
+        sources: null,
+      },
+    });
+    const node = await adapter.getNode("RF-roundtrip-001");
+    expect(node).not.toBeNull();
+    expect(node!.properties.topic).toBe("SQLite performance");
+    expect(node!.properties.content).toBe("WAL mode is faster");
+  });
+
+  it("module_spec: extension table row matches input properties", async () => {
+    await adapter.putNode({
+      id: "mod-roundtrip",
+      type: "module_spec",
+      properties: {
+        name: "auth-module",
+        scope: "Authentication and authorization",
+        provides: ["login", "logout"],
+        requires: ["database"],
+        boundary_rules: ["no direct DB access"],
+      },
+    });
+    const node = await adapter.getNode("mod-roundtrip");
+    expect(node).not.toBeNull();
+    expect(node!.properties.name).toBe("auth-module");
+    expect(node!.properties.scope).toBe("Authentication and authorization");
+  });
+
+  it("interview_question: extension table row matches input properties", async () => {
+    await adapter.putNode({
+      id: "IQ-roundtrip-001",
+      type: "interview_question",
+      properties: {
+        interview_id: "interview-refine-001",
+        question: "What is the main pain point?",
+        answer: "Slow builds",
+        domain: "workflow",
+        seq: 1,
+      },
+    });
+    const node = await adapter.getNode("IQ-roundtrip-001");
+    expect(node).not.toBeNull();
+    expect(node!.properties.interview_id).toBe("interview-refine-001");
+    expect(node!.properties.question).toBe("What is the main pain point?");
+    expect(node!.properties.answer).toBe("Slow builds");
+    expect(node!.properties.seq).toBe(1);
+  });
+
+  it("proxy_human_decision: extension table row matches input properties", async () => {
+    fs.mkdirSync(path.join(ideateDir, "cycles", "002", "proxy-human"), { recursive: true });
+    // No triggered_by here to avoid FK constraint on non-existent node; edge side-effect
+    // is covered by the dedicated triggered_by edge test below.
+    await adapter.putNode({
+      id: "PHD-01",
+      type: "proxy_human_decision",
+      cycle: 2,
+      properties: {
+        cycle: 2,
+        trigger: "scope ambiguity",
+        triggered_by: null,
+        decision: "proceed",
+        rationale: "Low risk",
+        timestamp: "2026-01-15T10:00:00.000Z",
+        status: "resolved",
+      },
+    });
+    const node = await adapter.getNode("PHD-01");
+    expect(node).not.toBeNull();
+    expect(node!.properties.trigger).toBe("scope ambiguity");
+    expect(node!.properties.decision).toBe("proceed");
+    expect(node!.properties.status).toBe("resolved");
+  });
+
+  it("project: extension table row matches input properties", async () => {
+    await adapter.putNode({
+      id: "PR-RT-001",
+      type: "project",
+      properties: {
+        name: "Test Project",
+        description: "A roundtrip test project",
+        intent: "Validate registry dispatch",
+        status: "active",
+        current_phase_id: null,
+        appetite: 3,
+        steering: null,
+        scope_boundary: null,
+        success_criteria: null,
+        horizon: null,
+      },
+    });
+    const node = await adapter.getNode("PR-RT-001");
+    expect(node).not.toBeNull();
+    expect(node!.properties.name).toBe("Test Project");
+    expect(node!.properties.intent).toBe("Validate registry dispatch");
+    expect(node!.properties.status).toBe("active");
+    expect(node!.properties.appetite).toBe(3);
+  });
+
+  it("phase: extension table row matches input properties", async () => {
+    await adapter.putNode({
+      id: "PH-RT-001",
+      type: "phase",
+      properties: {
+        name: "Implementation Phase",
+        description: "Build the features",
+        project: "PR-001",
+        phase_type: "implementation",
+        intent: "Deliver WI-001 through WI-005",
+        status: "active",
+        steering: null,
+        work_items: ["WI-001", "WI-002"],
+        completed_date: null,
+      },
+    });
+    const node = await adapter.getNode("PH-RT-001");
+    expect(node).not.toBeNull();
+    expect(node!.properties.name).toBe("Implementation Phase");
+    expect(node!.properties.project).toBe("PR-001");
+    expect(node!.properties.phase_type).toBe("implementation");
+    expect(node!.properties.status).toBe("active");
+  });
+
+  it("journal_entry: extension table row matches input properties", async () => {
+    fs.mkdirSync(path.join(ideateDir, "cycles", "001", "journal"), { recursive: true });
+    await adapter.putNode({
+      id: "J-001-001",
+      type: "journal_entry",
+      cycle: 1,
+      properties: {
+        phase: "execute",
+        date: "2026-01-15",
+        title: "Test entry",
+        work_item: "WI-001",
+        content: "Completed the task",
+      },
+    });
+    const node = await adapter.getNode("J-001-001");
+    expect(node).not.toBeNull();
+    expect(node!.properties.phase).toBe("execute");
+    expect(node!.properties.title).toBe("Test entry");
+    expect(node!.properties.content).toBe("Completed the task");
+  });
+
+  it("overview (document_artifact): extension table row matches input properties", async () => {
+    await adapter.putNode({
+      id: "plan-overview",
+      type: "overview",
+      properties: {
+        title: "Project Overview",
+        content: "This project aims to...",
+        cycle: 1,
+      },
+    });
+    const node = await adapter.getNode("plan-overview");
+    expect(node).not.toBeNull();
+    expect(node!.properties.title).toBe("Project Overview");
+    expect(node!.properties.content).toBe("This project aims to...");
+  });
+
+  it("work_item with depends: inserts depends_on edges into edge table", async () => {
+    // Seed dependency target
+    await adapter.putNode({
+      id: "WI-DEP-TARGET",
+      type: "work_item",
+      properties: { title: "Target", status: "pending" },
+    });
+    await adapter.putNode({
+      id: "WI-DEP-SOURCE",
+      type: "work_item",
+      properties: {
+        title: "Source item",
+        depends: ["WI-DEP-TARGET"],
+        status: "pending",
+      },
+    });
+    const edge = db
+      .prepare(`SELECT edge_type FROM edges WHERE source_id = ? AND target_id = ?`)
+      .get("WI-DEP-SOURCE", "WI-DEP-TARGET") as { edge_type: string } | undefined;
+    expect(edge).toBeDefined();
+    expect(edge!.edge_type).toBe("depends_on");
+  });
+
+  it("proxy_human_decision with triggered_by: inserts triggered_by edges", async () => {
+    fs.mkdirSync(path.join(ideateDir, "cycles", "003", "proxy-human"), { recursive: true });
+    // Seed target node
+    await adapter.putNode({
+      id: "WI-PHD-REF",
+      type: "work_item",
+      properties: { title: "Referenced WI", status: "pending" },
+    });
+    await adapter.putNode({
+      id: "PHD-02",
+      type: "proxy_human_decision",
+      cycle: 3,
+      properties: {
+        cycle: 3,
+        trigger: "unclear scope",
+        triggered_by: [{ type: "work_item", id: "WI-PHD-REF" }],
+        decision: "defer",
+        rationale: "Needs more info",
+        timestamp: "2026-02-01T12:00:00.000Z",
+        status: "resolved",
+      },
+    });
+    const edge = db
+      .prepare(`SELECT edge_type FROM edges WHERE source_id = ? AND target_id = ?`)
+      .get("PHD-02", "WI-PHD-REF") as { edge_type: string } | undefined;
+    expect(edge).toBeDefined();
+    expect(edge!.edge_type).toBe("triggered_by");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WI-922 — isLinkedByDepends: seeds from existing SQLite depends_on edges
+//
+// Regression guard for the fix in writer.ts that seeds dependsGraph from
+// existing SQLite edges before the BFS. Without the fix, items in the current
+// batch that are reachable only through a pre-existing node (not in the batch)
+// could not have their dependency relationship detected, causing a false
+// scope-collision error.
+// ---------------------------------------------------------------------------
+
+describe("WI-922 — isLinkedByDepends respects pre-existing SQLite depends_on edges", () => {
+  it("batch [WI-B depends:[WI-A], WI-C depends:[WI-A]] succeeds after WI-A is seeded", async () => {
+    // Cycle 1: seed WI-A with no depends
+    await adapter.putNode({
+      id: "WI-LINK-A",
+      type: "work_item",
+      properties: { title: "Existing shared dep", status: "pending" },
+    });
+
+    // Cycle 2: batch-write WI-B and WI-C, both depending on WI-A.
+    // They do NOT share scope files — so no collision should occur.
+    const result = await adapter.batchMutate({
+      nodes: [
+        {
+          id: "WI-LINK-B",
+          type: "work_item",
+          properties: {
+            title: "Item B",
+            status: "pending",
+            depends: ["WI-LINK-A"],
+            scope: [{ path: "src/b.ts", op: "modify" }],
+          },
+        },
+        {
+          id: "WI-LINK-C",
+          type: "work_item",
+          properties: {
+            title: "Item C",
+            status: "pending",
+            depends: ["WI-LINK-A"],
+            scope: [{ path: "src/c.ts", op: "modify" }],
+          },
+        },
+      ],
+    });
+
+    // Both writes must succeed — no false scope-collision error
+    expect(result.errors).toHaveLength(0);
+    expect(result.results).toHaveLength(2);
+    const ids = result.results.map(r => r.id);
+    expect(ids).toContain("WI-LINK-B");
+    expect(ids).toContain("WI-LINK-C");
+  });
+
+  it("cross-batch depends chain: WI-C reachable via pre-existing edge WI-B→WI-A prevents collision", async () => {
+    // Cycle 1: seed WI-A and WI-B where WI-B depends on WI-A.
+    // This stores a depends_on edge WI-B→WI-A in SQLite.
+    await adapter.putNode({
+      id: "WI-CHAIN-A",
+      type: "work_item",
+      properties: {
+        title: "Chain root",
+        status: "pending",
+        scope: [{ path: "src/shared.ts", op: "modify" }],
+      },
+    });
+    await adapter.putNode({
+      id: "WI-CHAIN-B",
+      type: "work_item",
+      properties: {
+        title: "Chain middle",
+        status: "pending",
+        depends: ["WI-CHAIN-A"],
+      },
+    });
+
+    // Verify the depends_on edge was stored in SQLite
+    const edge = db
+      .prepare(`SELECT edge_type FROM edges WHERE source_id = ? AND target_id = ?`)
+      .get("WI-CHAIN-B", "WI-CHAIN-A") as { edge_type: string } | undefined;
+    expect(edge).toBeDefined();
+    expect(edge!.edge_type).toBe("depends_on");
+
+    // Cycle 2: batch-write [WI-CHAIN-A (update, scope: shared.ts),
+    //                        WI-CHAIN-C (depends:[WI-CHAIN-B], scope: shared.ts)]
+    //
+    // WI-CHAIN-A and WI-CHAIN-C share a scope file. Without the fix,
+    // dependsGraph has no entry for WI-CHAIN-B (not in batch), so
+    // reachable(WI-CHAIN-C, WI-CHAIN-A) cannot traverse WI-CHAIN-C→WI-CHAIN-B→WI-CHAIN-A.
+    // With the fix, the SQLite edge WI-CHAIN-B→WI-CHAIN-A is seeded
+    // (target_id=WI-CHAIN-A is in the batch), enabling the full traversal.
+    const result = await adapter.batchMutate({
+      nodes: [
+        {
+          id: "WI-CHAIN-A",
+          type: "work_item",
+          properties: {
+            title: "Chain root updated",
+            status: "pending",
+            scope: [{ path: "src/shared.ts", op: "modify" }],
+          },
+        },
+        {
+          id: "WI-CHAIN-C",
+          type: "work_item",
+          properties: {
+            title: "Chain leaf",
+            status: "pending",
+            depends: ["WI-CHAIN-B"],
+            scope: [{ path: "src/shared.ts", op: "modify" }],
+          },
+        },
+      ],
+    });
+
+    // Both writes must succeed — no false scope-collision error.
+    // Pre-fix: errors would contain a "Scope collision between items WI-CHAIN-A and WI-CHAIN-C" entry.
+    expect(result.errors).toHaveLength(0);
+    expect(result.results).toHaveLength(2);
   });
 });
 

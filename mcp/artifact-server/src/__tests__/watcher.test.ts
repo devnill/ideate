@@ -5,7 +5,7 @@ import path from "path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { ArtifactWatcher, BatchChangeEvent } from "../watcher.js";
-import { rebuildIndex, indexFiles, removeFiles } from "../indexer.js";
+import { indexFiles, removeFiles } from "../indexer.js";
 import { createSchema } from "../schema.js";
 
 let tmpDir: string;

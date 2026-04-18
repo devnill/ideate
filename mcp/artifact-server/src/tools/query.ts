@@ -131,7 +131,6 @@ export async function handleArtifactQuery(
   if (relatedTo) {
     let result;
     try {
-      const { NotFoundError } = await import("../adapter.js");
       result = await adapter.queryGraph(
         {
           origin_id: relatedTo,

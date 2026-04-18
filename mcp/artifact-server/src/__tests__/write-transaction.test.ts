@@ -17,7 +17,6 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import * as crypto from "crypto";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import fs from "fs";
@@ -686,7 +685,7 @@ describe("LocalAdapter.deleteNode — transaction failure", () => {
 
     // Patch the db.transaction method to throw an error
     const originalTransaction = testDb.transaction.bind(testDb);
-    testDb.transaction = ((fn: () => void) => {
+    testDb.transaction = ((_fn: () => void) => {
       return () => {
         throw new Error("simulated SQLite transaction failure");
       };
