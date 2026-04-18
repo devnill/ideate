@@ -68,6 +68,7 @@ export const domainDecisions = sqliteTable("domain_decisions", {
   rationale: text("rationale"),
   title: text("title"),
   source: text("source"),
+  derived_from: text("derived_from"),
 });
 
 export const domainQuestions = sqliteTable("domain_questions", {

@@ -2184,3 +2184,556 @@ describe("indexFiles — journal entry belongs_to_cycle derivation (WI-720 incre
     expect(edge!.edge_type).toBe("belongs_to_cycle");
   });
 });
+
+// ---------------------------------------------------------------------------
+// WI-905: supersedes edge — work_item → work_item via superseded_by field
+// ---------------------------------------------------------------------------
+
+describe("rebuildIndex — work_item superseded_by field produces supersedes edge (WI-905)", () => {
+  it("creates a supersedes edge from WI-X (newer) to WI-Y (older) via superseded_by field", () => {
+    const db = freshDb();
+    const ideateDir = makeIdeateDir(tmpDir);
+    const wiDir = path.join(ideateDir, "work-items");
+
+    // WI-Y: the older item being superseded
+    writeYaml(wiDir, "WI-Y.yaml", minimalWorkItem({ id: "WI-Y", title: "Older work item" }));
+
+    // WI-X: the newer item — uses superseded_by to point to WI-Y
+    const yamlNew = [
+      `id: "WI-X"`,
+      `type: "work_item"`,
+      `title: "Newer work item"`,
+      `status: "pending"`,
+      `complexity: "small"`,
+      `cycle_created: 5`,
+      `cycle_modified: null`,
+      `content_hash: ""`,
+      `token_count: 0`,
+      `file_path: ""`,
+      `superseded_by: "WI-Y"`,
+      `depends: []`,
+      `blocks: []`,
+      `criteria: []`,
+      `scope: []`,
+    ].join("\n") + "\n";
+
+    writeYaml(wiDir, "WI-X.yaml", yamlNew);
+
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
+
+    const edge = db
+      .prepare(
+        `SELECT * FROM edges WHERE source_id = 'WI-X' AND target_id = 'WI-Y' AND edge_type = 'supersedes'`
+      )
+      .get() as { source_id: string; target_id: string; edge_type: string } | undefined;
+    expect(edge).toBeDefined();
+    expect(edge!.source_id).toBe("WI-X");
+    expect(edge!.target_id).toBe("WI-Y");
+    expect(edge!.edge_type).toBe("supersedes");
+  });
+
+  it("does not create a supersedes edge for a work_item without superseded_by field", () => {
+    const db = freshDb();
+    const ideateDir = makeIdeateDir(tmpDir);
+    const wiDir = path.join(ideateDir, "work-items");
+
+    writeYaml(wiDir, "WI-001.yaml", minimalWorkItem({ id: "WI-001", title: "Plain work item" }));
+
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
+
+    const edge = db
+      .prepare(
+        `SELECT * FROM edges WHERE source_id = 'WI-001' AND edge_type = 'supersedes'`
+      )
+      .get() as { source_id: string } | undefined;
+    expect(edge).toBeUndefined();
+  });
+
+  it("existing domain_decision supersedes edge still works (regression)", () => {
+    const db = freshDb();
+    const ideateDir = makeIdeateDir(tmpDir);
+    const decisionsDir = path.join(ideateDir, "decisions");
+
+    const yamlOld = [
+      `id: "D-001"`,
+      `type: "domain_decision"`,
+      `cycle_created: 1`,
+      `cycle_modified: null`,
+      `content_hash: ""`,
+      `token_count: 0`,
+      `file_path: ""`,
+      `status: "active"`,
+      `domain: "workflow"`,
+      `cycle: 1`,
+      `supersedes: null`,
+      `description: "Original decision"`,
+      `rationale: "First"`,
+    ].join("\n") + "\n";
+
+    const yamlNew = [
+      `id: "D-002"`,
+      `type: "domain_decision"`,
+      `cycle_created: 2`,
+      `cycle_modified: null`,
+      `content_hash: ""`,
+      `token_count: 0`,
+      `file_path: ""`,
+      `status: "active"`,
+      `domain: "workflow"`,
+      `cycle: 2`,
+      `supersedes: "D-001"`,
+      `description: "Newer decision"`,
+      `rationale: "Second"`,
+    ].join("\n") + "\n";
+
+    writeYaml(decisionsDir, "D-001.yaml", yamlOld);
+    writeYaml(decisionsDir, "D-002.yaml", yamlNew);
+
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
+
+    const edge = db
+      .prepare(
+        `SELECT * FROM edges WHERE source_id = 'D-002' AND target_id = 'D-001' AND edge_type = 'supersedes'`
+      )
+      .get() as { source_id: string; target_id: string; edge_type: string } | undefined;
+    expect(edge).toBeDefined();
+    expect(edge!.edge_type).toBe("supersedes");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WI-905: derived_from edge — domain_policy → finding, domain_decision → finding
+// ---------------------------------------------------------------------------
+
+describe("rebuildIndex — domain_policy derived_from finding produces derived_from edge (WI-905)", () => {
+  it("creates a derived_from edge from domain_policy to a finding", () => {
+    const db = freshDb();
+    const ideateDir = makeIdeateDir(tmpDir);
+    const policiesDir = path.join(ideateDir, "policies");
+    const cyclesDir = path.join(ideateDir, "cycles");
+
+    // Index a finding node so the edge target exists
+    const findingYaml = [
+      `id: "F-CYCLE-071-S1"`,
+      `type: "finding"`,
+      `cycle_created: 71`,
+      `cycle_modified: null`,
+      `content_hash: ""`,
+      `token_count: 0`,
+      `file_path: ""`,
+      `status: "resolved"`,
+      `severity: "significant"`,
+      `work_item: "WI-900"`,
+      `file_refs: []`,
+      `verdict: "fail"`,
+      `cycle: 71`,
+      `reviewer: "spec-reviewer"`,
+    ].join("\n") + "\n";
+
+    writeYaml(cyclesDir, "F-CYCLE-071-S1.yaml", findingYaml);
+
+    // A domain_policy derived from a finding (new combination)
+    const policyYaml = [
+      `id: "P-099"`,
+      `type: "domain_policy"`,
+      `cycle_created: 71`,
+      `cycle_modified: null`,
+      `content_hash: ""`,
+      `token_count: 0`,
+      `file_path: ""`,
+      `status: "active"`,
+      `domain: "workflow"`,
+      `derived_from:`,
+      `  - "F-CYCLE-071-S1"`,
+      `established: "2026-04-17"`,
+      `amended: null`,
+      `amended_by: null`,
+      `description: "Policy derived from a finding"`,
+    ].join("\n") + "\n";
+
+    writeYaml(policiesDir, "P-099.yaml", policyYaml);
+
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
+
+    const edge = db
+      .prepare(
+        `SELECT * FROM edges WHERE source_id = 'P-099' AND target_id = 'F-CYCLE-071-S1' AND edge_type = 'derived_from'`
+      )
+      .get() as { source_id: string; target_id: string; edge_type: string } | undefined;
+    expect(edge).toBeDefined();
+    expect(edge!.source_id).toBe("P-099");
+    expect(edge!.target_id).toBe("F-CYCLE-071-S1");
+    expect(edge!.edge_type).toBe("derived_from");
+  });
+});
+
+describe("rebuildIndex — domain_decision derived_from finding produces derived_from edge (WI-905)", () => {
+  it("creates a derived_from edge from domain_decision to a finding", () => {
+    const db = freshDb();
+    const ideateDir = makeIdeateDir(tmpDir);
+    const decisionsDir = path.join(ideateDir, "decisions");
+    const cyclesDir = path.join(ideateDir, "cycles");
+
+    // Index a finding node
+    const findingYaml = [
+      `id: "F-CYCLE-028-S3"`,
+      `type: "finding"`,
+      `cycle_created: 28`,
+      `cycle_modified: null`,
+      `content_hash: ""`,
+      `token_count: 0`,
+      `file_path: ""`,
+      `status: "resolved"`,
+      `severity: "critical"`,
+      `work_item: "WI-876"`,
+      `file_refs: []`,
+      `verdict: "fail"`,
+      `cycle: 28`,
+      `reviewer: "spec-reviewer"`,
+    ].join("\n") + "\n";
+
+    writeYaml(cyclesDir, "F-CYCLE-028-S3.yaml", findingYaml);
+
+    // A domain_decision derived from a finding (new source_type)
+    const decisionYaml = [
+      `id: "D-200"`,
+      `type: "domain_decision"`,
+      `cycle_created: 28`,
+      `cycle_modified: null`,
+      `content_hash: ""`,
+      `token_count: 0`,
+      `file_path: ""`,
+      `status: "active"`,
+      `domain: "artifact-structure"`,
+      `cycle: 28`,
+      `supersedes: null`,
+      `derived_from:`,
+      `  - "F-CYCLE-028-S3"`,
+      `description: "Decision derived from a finding"`,
+      `rationale: "The finding revealed the need for this decision"`,
+    ].join("\n") + "\n";
+
+    writeYaml(decisionsDir, "D-200.yaml", decisionYaml);
+
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
+
+    const edge = db
+      .prepare(
+        `SELECT * FROM edges WHERE source_id = 'D-200' AND target_id = 'F-CYCLE-028-S3' AND edge_type = 'derived_from'`
+      )
+      .get() as { source_id: string; target_id: string; edge_type: string } | undefined;
+    expect(edge).toBeDefined();
+    expect(edge!.source_id).toBe("D-200");
+    expect(edge!.target_id).toBe("F-CYCLE-028-S3");
+    expect(edge!.edge_type).toBe("derived_from");
+  });
+
+  it("creates a derived_from edge from domain_decision to a domain_policy (new target_type)", () => {
+    const db = freshDb();
+    const ideateDir = makeIdeateDir(tmpDir);
+    const decisionsDir = path.join(ideateDir, "decisions");
+    const policiesDir = path.join(ideateDir, "policies");
+
+    // Index a domain_policy node as target
+    const policyYaml = [
+      `id: "P-001"`,
+      `type: "domain_policy"`,
+      `cycle_created: 1`,
+      `cycle_modified: null`,
+      `content_hash: ""`,
+      `token_count: 0`,
+      `file_path: ""`,
+      `status: "active"`,
+      `domain: "workflow"`,
+      `derived_from: []`,
+      `established: "2026-01-01"`,
+      `amended: null`,
+      `amended_by: null`,
+      `description: "An existing policy"`,
+    ].join("\n") + "\n";
+
+    writeYaml(policiesDir, "P-001.yaml", policyYaml);
+
+    // A domain_decision derived from a domain_policy (new target_type)
+    const decisionYaml = [
+      `id: "D-201"`,
+      `type: "domain_decision"`,
+      `cycle_created: 30`,
+      `cycle_modified: null`,
+      `content_hash: ""`,
+      `token_count: 0`,
+      `file_path: ""`,
+      `status: "active"`,
+      `domain: "workflow"`,
+      `cycle: 30`,
+      `supersedes: null`,
+      `derived_from:`,
+      `  - "P-001"`,
+      `description: "Decision derived from a policy"`,
+      `rationale: "Extends the policy scope"`,
+    ].join("\n") + "\n";
+
+    writeYaml(decisionsDir, "D-201.yaml", decisionYaml);
+
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
+
+    const edge = db
+      .prepare(
+        `SELECT * FROM edges WHERE source_id = 'D-201' AND target_id = 'P-001' AND edge_type = 'derived_from'`
+      )
+      .get() as { source_id: string; target_id: string; edge_type: string } | undefined;
+    expect(edge).toBeDefined();
+    expect(edge!.source_id).toBe("D-201");
+    expect(edge!.target_id).toBe("P-001");
+    expect(edge!.edge_type).toBe("derived_from");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// guiding_principle derived_from roundtrip (WI-908 Fix 3)
+// ---------------------------------------------------------------------------
+
+describe("rebuildIndex — guiding_principle derived_from produces derived_from edge (WI-908)", () => {
+  it("creates a derived_from edge from a guiding_principle to another guiding_principle", () => {
+    const db = freshDb();
+    const ideateDir = makeIdeateDir(tmpDir);
+    const principlesDir = path.join(ideateDir, "principles");
+
+    // Target guiding_principle
+    const targetYaml = [
+      `id: "GP-01"`,
+      `type: "guiding_principle"`,
+      `cycle_created: 1`,
+      `cycle_modified: null`,
+      `content_hash: ""`,
+      `token_count: 0`,
+      `file_path: ""`,
+      `status: "active"`,
+      `name: "Foundational Principle"`,
+      `description: "A foundational principle"`,
+      `amendment_history: []`,
+    ].join("\n") + "\n";
+
+    writeYaml(principlesDir, "GP-01.yaml", targetYaml);
+
+    // Source guiding_principle with derived_from pointing to GP-01
+    const sourceYaml = [
+      `id: "GP-02"`,
+      `type: "guiding_principle"`,
+      `cycle_created: 5`,
+      `cycle_modified: null`,
+      `content_hash: ""`,
+      `token_count: 0`,
+      `file_path: ""`,
+      `status: "active"`,
+      `name: "Derived Principle"`,
+      `description: "A principle derived from GP-01"`,
+      `amendment_history: []`,
+      `derived_from:`,
+      `  - "GP-01"`,
+    ].join("\n") + "\n";
+
+    writeYaml(principlesDir, "GP-02.yaml", sourceYaml);
+
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
+
+    const edge = db
+      .prepare(
+        `SELECT * FROM edges WHERE source_id = 'GP-02' AND target_id = 'GP-01' AND edge_type = 'derived_from'`
+      )
+      .get() as { source_id: string; target_id: string; edge_type: string } | undefined;
+    expect(edge).toBeDefined();
+    expect(edge!.source_id).toBe("GP-02");
+    expect(edge!.target_id).toBe("GP-01");
+    expect(edge!.edge_type).toBe("derived_from");
+  });
+
+  it("creates a derived_from edge from a guiding_principle to a research_finding", () => {
+    const db = freshDb();
+    const ideateDir = makeIdeateDir(tmpDir);
+    const principlesDir = path.join(ideateDir, "principles");
+    const researchDir = path.join(ideateDir, "research");
+
+    // Target research_finding
+    const rfYaml = [
+      `id: "RF-q164-stale-reads"`,
+      `type: "research_finding"`,
+      `cycle_created: 71`,
+      `cycle_modified: null`,
+      `content_hash: ""`,
+      `token_count: 0`,
+      `file_path: ""`,
+      `status: "active"`,
+      `topic: "Stale reads"`,
+      `date: "2026-04-17"`,
+      `content: "Research on stale read patterns"`,
+      `sources: []`,
+    ].join("\n") + "\n";
+
+    writeYaml(researchDir, "RF-q164-stale-reads.yaml", rfYaml);
+
+    // Guiding principle derived from the research finding
+    const gpYaml = [
+      `id: "GP-14"`,
+      `type: "guiding_principle"`,
+      `cycle_created: 71`,
+      `cycle_modified: null`,
+      `content_hash: ""`,
+      `token_count: 0`,
+      `file_path: ""`,
+      `status: "active"`,
+      `name: "No .ideate/ writes from code"`,
+      `description: "Code must never write .ideate/ files directly"`,
+      `amendment_history: []`,
+      `derived_from:`,
+      `  - "RF-q164-stale-reads"`,
+    ].join("\n") + "\n";
+
+    writeYaml(principlesDir, "GP-14.yaml", gpYaml);
+
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
+
+    const edge = db
+      .prepare(
+        `SELECT * FROM edges WHERE source_id = 'GP-14' AND target_id = 'RF-q164-stale-reads' AND edge_type = 'derived_from'`
+      )
+      .get() as { source_id: string; target_id: string; edge_type: string } | undefined;
+    // Note: research_finding is not in target_types for derived_from, so the edge
+    // is only inserted if the target node exists — which it does. The source type
+    // guiding_principle IS now in source_types (WI-908), so the edge is emitted.
+    expect(edge).toBeDefined();
+    expect(edge!.source_id).toBe("GP-14");
+    expect(edge!.target_id).toBe("RF-q164-stale-reads");
+    expect(edge!.edge_type).toBe("derived_from");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Registry source_types enforcement negative tests (WI-908 Fix 4)
+// ---------------------------------------------------------------------------
+
+describe("registry source_types enforcement — supersedes", () => {
+  it("does NOT emit a supersedes edge when source type is 'finding' (not in source_types)", () => {
+    // finding is not in EDGE_TYPE_REGISTRY.supersedes.source_types,
+    // so a finding YAML with supersedes: "X" must not produce a supersedes edge.
+    const db = freshDb();
+    const ideateDir = makeIdeateDir(tmpDir);
+    const cyclesDir = path.join(ideateDir, "cycles");
+
+    // Target domain_decision
+    const targetDecisionYaml = [
+      `id: "D-OLD-001"`,
+      `type: "domain_decision"`,
+      `cycle_created: 1`,
+      `cycle_modified: null`,
+      `content_hash: ""`,
+      `token_count: 0`,
+      `file_path: ""`,
+      `status: "superseded"`,
+      `domain: "workflow"`,
+      `cycle: 1`,
+      `supersedes: null`,
+      `description: "Old decision"`,
+      `rationale: "Original rationale"`,
+    ].join("\n") + "\n";
+
+    const decisionsDir = path.join(ideateDir, "decisions");
+    writeYaml(decisionsDir, "D-OLD-001.yaml", targetDecisionYaml);
+
+    // A finding with a supersedes field — this type is NOT in supersedes.source_types
+    const findingYaml = [
+      `id: "F-ROGUE-001"`,
+      `type: "finding"`,
+      `cycle_created: 5`,
+      `cycle_modified: null`,
+      `content_hash: ""`,
+      `token_count: 0`,
+      `file_path: ""`,
+      `status: "resolved"`,
+      `severity: "minor"`,
+      `work_item: "WI-001"`,
+      `file_refs: []`,
+      `verdict: "pass"`,
+      `cycle: 5`,
+      `reviewer: "spec-reviewer"`,
+      `supersedes: "D-OLD-001"`,
+    ].join("\n") + "\n";
+
+    writeYaml(cyclesDir, "F-ROGUE-001.yaml", findingYaml);
+
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
+
+    const edge = db
+      .prepare(
+        `SELECT * FROM edges WHERE source_id = 'F-ROGUE-001' AND edge_type = 'supersedes'`
+      )
+      .get();
+    expect(edge).toBeUndefined();
+  });
+});
+
+describe("registry source_types enforcement — derived_from", () => {
+  it("does NOT emit a derived_from edge when source type is 'work_item' (not in source_types)", () => {
+    // work_item is not in EDGE_TYPE_REGISTRY.derived_from.source_types,
+    // so a work_item YAML with derived_from: ["GP-01"] must not produce a derived_from edge.
+    const db = freshDb();
+    const ideateDir = makeIdeateDir(tmpDir);
+    const principlesDir = path.join(ideateDir, "principles");
+    const wiDir = path.join(ideateDir, "work-items");
+
+    // Target guiding_principle
+    const gpYaml = [
+      `id: "GP-01"`,
+      `type: "guiding_principle"`,
+      `cycle_created: 1`,
+      `cycle_modified: null`,
+      `content_hash: ""`,
+      `token_count: 0`,
+      `file_path: ""`,
+      `status: "active"`,
+      `name: "Target Principle"`,
+      `description: "A principle"`,
+      `amendment_history: []`,
+    ].join("\n") + "\n";
+
+    writeYaml(principlesDir, "GP-01.yaml", gpYaml);
+
+    // A work_item with derived_from — this type is NOT in derived_from.source_types
+    const wiYaml = minimalWorkItem({
+      id: "WI-ROGUE-001",
+      title: "Rogue work item",
+      // Add derived_from as a raw YAML field — minimalWorkItem does not support it natively,
+      // so we build the YAML manually below.
+    });
+    // Build manually since minimalWorkItem doesn't support arbitrary extra fields:
+    const wiYamlFull = [
+      `id: "WI-ROGUE-001"`,
+      `type: "work_item"`,
+      `cycle_created: 5`,
+      `cycle_modified: null`,
+      `content_hash: ""`,
+      `token_count: 0`,
+      `file_path: ""`,
+      `status: "pending"`,
+      `title: "Rogue work item"`,
+      `complexity: "small"`,
+      `depends: []`,
+      `blocks: []`,
+      `criteria: []`,
+      `scope: []`,
+      `derived_from:`,
+      `  - "GP-01"`,
+    ].join("\n") + "\n";
+
+    writeYaml(wiDir, "WI-ROGUE-001.yaml", wiYamlFull);
+
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
+
+    const edge = db
+      .prepare(
+        `SELECT * FROM edges WHERE source_id = 'WI-ROGUE-001' AND edge_type = 'derived_from'`
+      )
+      .get();
+    expect(edge).toBeUndefined();
+  });
+});

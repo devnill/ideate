@@ -27,33 +27,33 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("runPendingMigrations", () => {
-  it("is a no-op when config schema_version already equals target (7)", () => {
-    writeConfig(ideateDir, { schema_version: 7 });
+  it("is a no-op when config schema_version already equals target (8)", () => {
+    writeConfig(ideateDir, { schema_version: 8 });
 
     const result = runPendingMigrations(ideateDir);
 
     expect(result.migrationsRun).toBe(0);
     expect(result.errors).toHaveLength(0);
-    // schema_version must remain 7
+    // schema_version must remain 8
     const config = readRawConfig(ideateDir);
-    expect(config.schema_version).toBe(7);
+    expect(config.schema_version).toBe(8);
   });
 
-  it("runs v4→v7 migration chain when config schema_version is 4 and arrives at target (7)", () => {
+  it("runs v4→v8 migration chain when config schema_version is 4 and arrives at target (8)", () => {
     writeConfig(ideateDir, { schema_version: 4 });
     // No index.db — the v4→v5 migration short-circuits when there is no DB,
     // but runPendingMigrations must still update schema_version through all
-    // pending migrations (v4→v5, v5→v6, v6→v7) to reach the current target.
+    // pending migrations (v4→v5, v5→v6, v6→v7, v7→v8) to reach the current target.
 
     const result = runPendingMigrations(ideateDir);
 
     expect(result.errors).toHaveLength(0);
     expect(result.migrationsRun).toBeGreaterThanOrEqual(1);
     const config = readRawConfig(ideateDir);
-    expect(config.schema_version).toBe(7);
+    expect(config.schema_version).toBe(8);
   });
 
-  it("updates schema_version to 7 after full migration chain on a DB with schema version 4", () => {
+  it("updates schema_version to 8 after full migration chain on a DB with schema version 4", () => {
     writeConfig(ideateDir, { schema_version: 4 });
 
     // Create a DB without the v5 columns (simulate a v4 database by building
@@ -149,10 +149,10 @@ describe("runPendingMigrations", () => {
     const result = runPendingMigrations(ideateDir);
 
     expect(result.errors).toHaveLength(0);
-    // v4→v5 (real transform) + v5→v6 (no-op stub) + v6→v7 (no-op stub)
-    expect(result.migrationsRun).toBe(3);
+    // v4→v5 (real transform) + v5→v6 (no-op stub) + v6→v7 (no-op stub) + v7→v8 (additive DDL)
+    expect(result.migrationsRun).toBe(4);
     const config = readRawConfig(ideateDir);
-    expect(config.schema_version).toBe(7);
+    expect(config.schema_version).toBe(8);
 
     // Verify the columns were actually added by the v4→v5 migration
     const db2 = new Database(dbPath);
@@ -219,8 +219,8 @@ describe("runPendingMigrations — error path", () => {
 // ---------------------------------------------------------------------------
 
 describe("runPendingMigrations — multi-step chain", () => {
-  it("applies all migrations in order when starting at v3, arriving at v7", () => {
-    // Start at v3 — all four migrations (v3→v4, v4→v5, v5→v6, v6→v7) should run
+  it("applies all migrations in order when starting at v3, arriving at v8", () => {
+    // Start at v3 — all five migrations (v3→v4, v4→v5, v5→v6, v6→v7, v7→v8) should run
     writeConfig(ideateDir, { schema_version: 3 });
 
     // Track which migrations were called and in what order
@@ -230,38 +230,43 @@ describe("runPendingMigrations — multi-step chain", () => {
     const v4ToV5 = MIGRATIONS.find((m) => m.fromVersion === 4 && m.toVersion === 5);
     const v5ToV6 = MIGRATIONS.find((m) => m.fromVersion === 5 && m.toVersion === 6);
     const v6ToV7 = MIGRATIONS.find((m) => m.fromVersion === 6 && m.toVersion === 7);
+    const v7ToV8 = MIGRATIONS.find((m) => m.fromVersion === 7 && m.toVersion === 8);
     expect(v3ToV4).toBeDefined();
     expect(v4ToV5).toBeDefined();
     expect(v5ToV6).toBeDefined();
     expect(v6ToV7).toBeDefined();
+    expect(v7ToV8).toBeDefined();
 
     const originalV3ToV4 = v3ToV4!.migrate;
     const originalV4ToV5 = v4ToV5!.migrate;
     const originalV5ToV6 = v5ToV6!.migrate;
     const originalV6ToV7 = v6ToV7!.migrate;
+    const originalV7ToV8 = v7ToV8!.migrate;
 
     v3ToV4!.migrate = (dir: string) => { migrationsCalled.push("v3→v4"); originalV3ToV4(dir); };
     v4ToV5!.migrate = (dir: string) => { migrationsCalled.push("v4→v5"); originalV4ToV5(dir); };
     v5ToV6!.migrate = (dir: string) => { migrationsCalled.push("v5→v6"); originalV5ToV6(dir); };
     v6ToV7!.migrate = (dir: string) => { migrationsCalled.push("v6→v7"); originalV6ToV7(dir); };
+    v7ToV8!.migrate = (dir: string) => { migrationsCalled.push("v7→v8"); originalV7ToV8(dir); };
 
     try {
       const result = runPendingMigrations(ideateDir);
 
       expect(result.errors).toHaveLength(0);
-      expect(result.migrationsRun).toBe(4);
+      expect(result.migrationsRun).toBe(5);
 
       // All steps ran in order
-      expect(migrationsCalled).toEqual(["v3→v4", "v4→v5", "v5→v6", "v6→v7"]);
+      expect(migrationsCalled).toEqual(["v3→v4", "v4→v5", "v5→v6", "v6→v7", "v7→v8"]);
 
-      // Final schema_version is 7
+      // Final schema_version is 8
       const config = readRawConfig(ideateDir);
-      expect(config.schema_version).toBe(7);
+      expect(config.schema_version).toBe(8);
     } finally {
       v3ToV4!.migrate = originalV3ToV4;
       v4ToV5!.migrate = originalV4ToV5;
       v5ToV6!.migrate = originalV5ToV6;
       v6ToV7!.migrate = originalV6ToV7;
+      v7ToV8!.migrate = originalV7ToV8;
     }
   });
 });
@@ -272,8 +277,8 @@ describe("runPendingMigrations — multi-step chain", () => {
 
 describe("runPendingMigrations — already at target version", () => {
   it("runs no migrations and calls no migrate functions when schema_version equals the target", () => {
-    // Start at the current target version (7)
-    writeConfig(ideateDir, { schema_version: 7 });
+    // Start at the current target version (8)
+    writeConfig(ideateDir, { schema_version: 8 });
 
     // Wrap every migration's migrate function to detect if any are called
     const called: string[] = [];
@@ -297,7 +302,7 @@ describe("runPendingMigrations — already at target version", () => {
 
       // schema_version stays at target
       const config = readRawConfig(ideateDir);
-      expect(config.schema_version).toBe(7);
+      expect(config.schema_version).toBe(8);
     } finally {
       MIGRATIONS.forEach((m, i) => {
         m.migrate = originals[i];
@@ -307,62 +312,74 @@ describe("runPendingMigrations — already at target version", () => {
 });
 
 // ---------------------------------------------------------------------------
-// v5→v6 and v6→v7 stubs: loaded from v5, both run, arrive at v7
+// v5→v6, v6→v7, and v7→v8 stubs: loaded from v5, all run, arrive at v8
 // ---------------------------------------------------------------------------
 
-describe("runPendingMigrations — v5→v6 and v6→v7 no-op stubs", () => {
-  it("starting at v5 runs both stubs exactly once and arrives at v7", () => {
+describe("runPendingMigrations — v5→v6, v6→v7, v7→v8 stubs", () => {
+  it("starting at v5 runs all three stubs exactly once and arrives at v8", () => {
     writeConfig(ideateDir, { schema_version: 5 });
 
     const v5ToV6 = MIGRATIONS.find((m) => m.fromVersion === 5 && m.toVersion === 6);
     const v6ToV7 = MIGRATIONS.find((m) => m.fromVersion === 6 && m.toVersion === 7);
+    const v7ToV8 = MIGRATIONS.find((m) => m.fromVersion === 7 && m.toVersion === 8);
     expect(v5ToV6).toBeDefined();
     expect(v6ToV7).toBeDefined();
+    expect(v7ToV8).toBeDefined();
 
     let v5ToV6CallCount = 0;
     let v6ToV7CallCount = 0;
+    let v7ToV8CallCount = 0;
 
     const originalV5ToV6 = v5ToV6!.migrate;
     const originalV6ToV7 = v6ToV7!.migrate;
+    const originalV7ToV8 = v7ToV8!.migrate;
 
     v5ToV6!.migrate = (dir: string) => { v5ToV6CallCount++; originalV5ToV6(dir); };
     v6ToV7!.migrate = (dir: string) => { v6ToV7CallCount++; originalV6ToV7(dir); };
+    v7ToV8!.migrate = (dir: string) => { v7ToV8CallCount++; originalV7ToV8(dir); };
 
     try {
       const result = runPendingMigrations(ideateDir);
 
       expect(result.errors).toHaveLength(0);
-      expect(result.migrationsRun).toBe(2);
+      expect(result.migrationsRun).toBe(3);
 
       // Each stub invoked exactly once
       expect(v5ToV6CallCount).toBe(1);
       expect(v6ToV7CallCount).toBe(1);
+      expect(v7ToV8CallCount).toBe(1);
 
-      // Arrived at v7
+      // Arrived at v8
       const config = readRawConfig(ideateDir);
-      expect(config.schema_version).toBe(7);
+      expect(config.schema_version).toBe(8);
     } finally {
       v5ToV6!.migrate = originalV5ToV6;
       v6ToV7!.migrate = originalV6ToV7;
+      v7ToV8!.migrate = originalV7ToV8;
     }
   });
 
-  it("starting at v7 invokes neither v5→v6 nor v6→v7 stub (idempotent + forward-only)", () => {
-    writeConfig(ideateDir, { schema_version: 7 });
+  it("starting at v8 invokes no migration stubs (idempotent + forward-only)", () => {
+    writeConfig(ideateDir, { schema_version: 8 });
 
     const v5ToV6 = MIGRATIONS.find((m) => m.fromVersion === 5 && m.toVersion === 6);
     const v6ToV7 = MIGRATIONS.find((m) => m.fromVersion === 6 && m.toVersion === 7);
+    const v7ToV8 = MIGRATIONS.find((m) => m.fromVersion === 7 && m.toVersion === 8);
     expect(v5ToV6).toBeDefined();
     expect(v6ToV7).toBeDefined();
+    expect(v7ToV8).toBeDefined();
 
     let v5ToV6CallCount = 0;
     let v6ToV7CallCount = 0;
+    let v7ToV8CallCount = 0;
 
     const originalV5ToV6 = v5ToV6!.migrate;
     const originalV6ToV7 = v6ToV7!.migrate;
+    const originalV7ToV8 = v7ToV8!.migrate;
 
     v5ToV6!.migrate = (dir: string) => { v5ToV6CallCount++; originalV5ToV6(dir); };
     v6ToV7!.migrate = (dir: string) => { v6ToV7CallCount++; originalV6ToV7(dir); };
+    v7ToV8!.migrate = (dir: string) => { v7ToV8CallCount++; originalV7ToV8(dir); };
 
     try {
       const result = runPendingMigrations(ideateDir);
@@ -370,15 +387,103 @@ describe("runPendingMigrations — v5→v6 and v6→v7 no-op stubs", () => {
       expect(result.errors).toHaveLength(0);
       expect(result.migrationsRun).toBe(0);
 
-      // Neither stub was invoked
+      // No stubs invoked
       expect(v5ToV6CallCount).toBe(0);
       expect(v6ToV7CallCount).toBe(0);
+      expect(v7ToV8CallCount).toBe(0);
 
       const config = readRawConfig(ideateDir);
-      expect(config.schema_version).toBe(7);
+      expect(config.schema_version).toBe(8);
     } finally {
       v5ToV6!.migrate = originalV5ToV6;
       v6ToV7!.migrate = originalV6ToV7;
+      v7ToV8!.migrate = originalV7ToV8;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v7→v8 migration idempotency
+// ---------------------------------------------------------------------------
+
+describe("v7→v8 migration idempotency", () => {
+  it("v7→v8 migrate() does not throw when called on a DB that already has derived_from", () => {
+    const v7ToV8 = MIGRATIONS.find((m) => m.fromVersion === 7 && m.toVersion === 8);
+    expect(v7ToV8).toBeDefined();
+
+    // Create a fresh DB using createSchema — it already has derived_from
+    const dbPath = path.join(ideateDir, "index.db");
+    const db = new Database(dbPath);
+    createSchema(db);
+    db.close();
+
+    // Running the migration again must not throw (column already exists)
+    expect(() => v7ToV8!.migrate(ideateDir)).not.toThrow();
+  });
+
+  it("v7→v8 migrate() adds derived_from column to a v7-era DB that lacks it", () => {
+    const v7ToV8 = MIGRATIONS.find((m) => m.fromVersion === 7 && m.toVersion === 8);
+    expect(v7ToV8).toBeDefined();
+
+    // Build a DB at user_version=7 without the derived_from column
+    const dbPath = path.join(ideateDir, "index.db");
+    const db = new Database(dbPath);
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS domain_decisions (
+          id          TEXT PRIMARY KEY,
+          domain      TEXT NOT NULL,
+          cycle       INTEGER,
+          supersedes  TEXT,
+          description TEXT,
+          rationale   TEXT,
+          title       TEXT,
+          source      TEXT
+        )
+      `);
+      db.pragma(`user_version = 7`);
+    } finally {
+      db.close();
+    }
+
+    // Run the migration
+    v7ToV8!.migrate(ideateDir);
+
+    // Verify column was added
+    const db2 = new Database(dbPath);
+    try {
+      const cols = db2.prepare("PRAGMA table_info(domain_decisions)").all() as Array<{ name: string }>;
+      expect(cols.some((c) => c.name === "derived_from")).toBe(true);
+      const version = db2.pragma("user_version", { simple: true }) as number;
+      expect(version).toBe(8);
+    } finally {
+      db2.close();
+    }
+  });
+
+  it("v7→v8 migrate() is a no-op when user_version is already >= 8", () => {
+    const v7ToV8 = MIGRATIONS.find((m) => m.fromVersion === 7 && m.toVersion === 8);
+    expect(v7ToV8).toBeDefined();
+
+    // Create DB already at v8
+    const dbPath = path.join(ideateDir, "index.db");
+    const db = new Database(dbPath);
+    try {
+      db.exec(`CREATE TABLE IF NOT EXISTS domain_decisions (id TEXT PRIMARY KEY, domain TEXT NOT NULL, derived_from TEXT)`);
+      db.pragma(`user_version = 8`);
+    } finally {
+      db.close();
+    }
+
+    // Running migration again must not throw and must leave user_version at 8
+    expect(() => v7ToV8!.migrate(ideateDir)).not.toThrow();
+
+    const db2 = new Database(dbPath);
+    try {
+      const version = db2.pragma("user_version", { simple: true }) as number;
+      expect(version).toBe(8);
+    } finally {
+      db2.close();
     }
   });
 });
@@ -409,7 +514,7 @@ describe("runPendingMigrations — fallback warn path", () => {
       expect(result.migrationsRun).toBe(0);
       expect(result.errors).toHaveLength(0);
       const config = readRawConfig(ideateDir);
-      expect(config.schema_version).toBe(7);
+      expect(config.schema_version).toBe(8);
 
       // log.warn was called at least once with the migrations prefix
       const warnCalls = warnSpy.mock.calls;

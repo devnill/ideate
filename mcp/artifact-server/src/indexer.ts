@@ -192,6 +192,7 @@ function buildExtensionRow(table: string, doc: Row): Row {
         rationale: toStrOrNull(doc.rationale),
         title: toStrOrNull(doc.title),
         source: toStrOrNull(doc.source),
+        derived_from: toJsonOrNull(doc.derived_from),
       };
 
     case "domain_questions":
@@ -354,6 +355,38 @@ function extractEdges(
       } else {
         insertEdge(drizzleDb, { source_id: nodeId, target_id: fieldValue.trim(), edge_type: edgeType, props: null });
         edgesCreated++;
+      }
+    }
+  }
+
+  // Derivation: supersedes edge from work_item.superseded_by field.
+  // work_item artifacts use the field name "superseded_by" (not "supersedes") to
+  // point to the older item they replace. The edge direction is still:
+  //   newer_work_item --supersedes--> older_work_item
+  // This mirrors the reversed-direction naming documented on the supersedes
+  // registry entry in schema.ts (derivationPath: "work_item_superseded_by_field").
+  if (nodeType === "work_item") {
+    const supersededBy = doc.superseded_by;
+    if (typeof supersededBy === "string" && supersededBy.trim()) {
+      insertEdge(drizzleDb, {
+        source_id: nodeId,
+        target_id: supersededBy.trim(),
+        edge_type: "supersedes",
+        props: null,
+      });
+      edgesCreated++;
+    } else if (Array.isArray(supersededBy)) {
+      for (const item of supersededBy) {
+        const targetId = typeof item === "string" ? item.trim() : null;
+        if (targetId) {
+          insertEdge(drizzleDb, {
+            source_id: nodeId,
+            target_id: targetId,
+            edge_type: "supersedes",
+            props: null,
+          });
+          edgesCreated++;
+        }
       }
     }
   }

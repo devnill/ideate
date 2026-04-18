@@ -17,9 +17,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import { createSchema, CONTAINMENT_EDGE_TYPES } from "../schema.js";
+import { createSchema, CONTAINMENT_EDGE_TYPES, EDGE_TYPES } from "../schema.js";
 import * as dbSchema from "../db.js";
-import { computePPR, PPROptions } from "../ppr.js";
+import { computePPR, DEFAULT_EDGE_TYPE_WEIGHTS, PPROptions } from "../ppr.js";
 import { ValidationError } from "../adapter.js";
 import { LocalContextAdapter } from "../adapters/local/context.js";
 
@@ -1765,6 +1765,70 @@ describe("computePPR — CONTAINMENT_EDGE_TYPES exclusion (WI-893 regression)", 
 // ---------------------------------------------------------------------------
 // Test 11: LocalContextAdapter.traverse boundary validation (WI-697)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Test: DEFAULT_EDGE_TYPE_WEIGHTS coverage regression (WI-906)
+// ---------------------------------------------------------------------------
+//
+// Previously only 5 of 16 registered edge types had explicit weights; the
+// other 11 silently fell back to 1.0 inside computePPR. WI-906 added explicit
+// weights for all 16 types. This test asserts that DEFAULT_EDGE_TYPE_WEIGHTS
+// contains an entry for every type listed in EDGE_TYPES so the silent-default
+// path is never hit for registered edge types.
+//
+// NOTE: PPR scores shift relative to pre-WI-906 behaviour because 11 edge
+// types previously defaulted to 1.0 but now carry deliberate, lower weights.
+// This is intentional — see the grouped rationale comment in ppr.ts.
+
+describe("DEFAULT_EDGE_TYPE_WEIGHTS — coverage regression (WI-906)", () => {
+  it("has an explicit weight for every type in EDGE_TYPES", () => {
+    // EDGE_TYPES is the canonical enumeration of all registered edge types
+    // in schema.ts (currently 16 entries). Every one must appear in
+    // DEFAULT_EDGE_TYPE_WEIGHTS so computePPR never silently falls back to 1.0
+    // for a registered type.
+    for (const edgeType of EDGE_TYPES) {
+      expect(
+        Object.prototype.hasOwnProperty.call(DEFAULT_EDGE_TYPE_WEIGHTS, edgeType),
+        `DEFAULT_EDGE_TYPE_WEIGHTS is missing an explicit entry for edge type "${edgeType}"`
+      ).toBe(true);
+    }
+  });
+
+  it("all weights are finite non-negative numbers", () => {
+    for (const [edgeType, weight] of Object.entries(DEFAULT_EDGE_TYPE_WEIGHTS)) {
+      expect(
+        Number.isFinite(weight),
+        `weight for "${edgeType}" is not a finite number`
+      ).toBe(true);
+      expect(
+        weight >= 0,
+        `weight for "${edgeType}" must be >= 0, got ${weight}`
+      ).toBe(true);
+    }
+  });
+
+  it("containment edge types have weight 0 (they are excluded from PPR traversal)", () => {
+    // Containment edges are excluded from PPR traversal by the
+    // CONTAINMENT_EDGE_TYPES guard in computePPR. Their weights in
+    // DEFAULT_EDGE_TYPE_WEIGHTS are 0 to make intent explicit.
+    for (const ct of CONTAINMENT_EDGE_TYPES) {
+      expect(DEFAULT_EDGE_TYPE_WEIGHTS[ct]).toBe(0);
+    }
+  });
+
+  it("non-containment semantic edges have weight > 0", () => {
+    // Every edge type NOT in CONTAINMENT_EDGE_TYPES must have a positive
+    // weight so it can actually propagate score through the graph.
+    for (const edgeType of EDGE_TYPES) {
+      if (!CONTAINMENT_EDGE_TYPES.has(edgeType)) {
+        expect(
+          DEFAULT_EDGE_TYPE_WEIGHTS[edgeType],
+          `non-containment edge "${edgeType}" must have weight > 0`
+        ).toBeGreaterThan(0);
+      }
+    }
+  });
+});
 
 describe("LocalContextAdapter.traverse — boundary validation", () => {
   it("throws ValidationError for alpha=0", async () => {

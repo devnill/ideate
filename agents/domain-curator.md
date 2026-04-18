@@ -99,6 +99,8 @@ Follow the format of existing decision entries in the domain state. If no entrie
 
 Entries should be 6-10 lines. Do not duplicate the full finding text from the archive — summarize with enough rationale that an agent can apply this decision correctly in edge cases without reading the source. The source citation is for deep dives, not primary context.
 
+**derived_from field**: When authoring a `domain_decision` artifact directly from a review finding, include a `derived_from` list in the YAML with the finding's ID (e.g., `derived_from: ["F-CYCLE-NNN-SX"]`). The field may reference findings, guiding principles, or other domain policies. See also Section 4.2 for the same requirement on policies.
+
 ### 4.2 Policies
 
 For each policy-grade decision, append a policy entry. Use sequential IDs continuing from the highest existing P-N.
@@ -106,6 +108,8 @@ For each policy-grade decision, append a policy entry. Use sequential IDs contin
 Check first: does an existing policy already cover this? If yes, update the existing policy entry (add a `**Amended**` line with cycle and change) rather than creating a new one.
 
 Follow the format of existing policy entries in the domain state. If no entries exist yet, use: `## P-{N}: {Title}` followed by a one-sentence rule, then fields: Derived from, Established, Status (active).
+
+**derived_from field**: When a new policy or decision is authored directly from a review finding, set the `derived_from` field on the artifact to include the finding's ID (e.g., `derived_from: ["F-CYCLE-NNN-SX"]`). This field may contain a list of IDs pointing to guiding principles, findings, or other domain policies. The `derived_from` field is indexed by the MCP artifact server and enables graph traversal from any artifact back to its source evidence. Write it whenever the derivation from a specific artifact is direct and traceable.
 
 **Conflict handling**: If a new policy-grade finding contradicts an existing active policy:
 1. Do NOT silently update the existing policy

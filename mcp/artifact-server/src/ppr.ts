@@ -59,12 +59,84 @@ const DEFAULT_ALPHA = 0.15;
 const DEFAULT_MAX_ITERATIONS = 50;
 const DEFAULT_CONVERGENCE_THRESHOLD = 1e-6;
 
-const DEFAULT_EDGE_TYPE_WEIGHTS: Record<string, number> = {
+/**
+ * DEFAULT_EDGE_TYPE_WEIGHTS — explicit weights for every registered edge type.
+ *
+ * Previously only 5 of 16 edge types were listed; the rest silently defaulted
+ * to 1.0. This table now covers all types in EDGE_TYPE_REGISTRY so every edge
+ * has a deliberate, documented weight. PPR scores shift because 11 edge types
+ * previously defaulted to 1.0 and now have lower, more appropriate weights.
+ *
+ * Containment edges (belongs_to_module, belongs_to_project, belongs_to_phase,
+ * belongs_to_cycle) are excluded from PPR traversal by the CONTAINMENT_EDGE_TYPES
+ * guard in computePPR, so their weights here are never consulted. They are
+ * listed explicitly so the coverage regression test can assert completeness.
+ *
+ * Groups and rationale:
+ *
+ * DEPENDENCY — edges that express execution-order or blocking relationships.
+ *   Strong semantic signal; higher weights reflect strong coupling.
+ *   depends_on: 1.0 — direct prerequisite; highest relevance
+ *   blocks:     0.3 — blocking relationship flows backwards; less relevant for
+ *               forward context assembly
+ *
+ * GOVERNANCE — edges that link artifacts to controlling principles or policies.
+ *   governed_by: 0.8 — governing constraint is very relevant to context
+ *   informed_by: 0.6 — informing decision is moderately relevant
+ *
+ * DERIVATION — edges that express intellectual derivation or resolution.
+ *   derived_from:  0.5 — domain policy derived from a principle; medium signal
+ *   addressed_by:  0.5 — finding/question resolved by a work item; medium signal
+ *   amended_by:    0.4 — later revision weakens relevance of the amended node
+ *
+ * REFERENCE — generic cross-references with lower specificity.
+ *   relates_to:  0.4 — generic association; useful but weak signal
+ *   references:  0.4 — generic cross-reference; same tier as relates_to
+ *
+ * TEMPORAL / HISTORICAL — edges tracking historical replacement or causation.
+ *   supersedes:    0.3 — older artifact is less relevant once superseded
+ *   triggered_by:  0.3 — causal link; relevant but not primary context
+ *
+ * DOMAIN MEMBERSHIP — belongs_to_domain is NOT a containment edge (not in
+ *   CONTAINMENT_EDGE_TYPES) but is still a weak organisational signal.
+ *   belongs_to_domain: 0.2 — domain tag; very broad association, low weight
+ *
+ * CONTAINMENT (never traversed by PPR — listed for coverage completeness only):
+ *   belongs_to_module:  0.0
+ *   belongs_to_project: 0.0
+ *   belongs_to_phase:   0.0
+ *   belongs_to_cycle:   0.0
+ */
+export const DEFAULT_EDGE_TYPE_WEIGHTS: Record<string, number> = {
+  // --- Dependency -----------------------------------------------------------
   depends_on: 1.0,
+  blocks: 0.3,
+
+  // --- Governance -----------------------------------------------------------
   governed_by: 0.8,
   informed_by: 0.6,
+
+  // --- Derivation -----------------------------------------------------------
+  derived_from: 0.5,
+  addressed_by: 0.5,
+  amended_by: 0.4,
+
+  // --- Reference ------------------------------------------------------------
+  relates_to: 0.4,
   references: 0.4,
-  blocks: 0.3,
+
+  // --- Temporal / Historical ------------------------------------------------
+  supersedes: 0.3,
+  triggered_by: 0.3,
+
+  // --- Domain membership (weak organisational signal) -----------------------
+  belongs_to_domain: 0.2,
+
+  // --- Containment (excluded from PPR traversal; listed for coverage only) --
+  belongs_to_module: 0.0,
+  belongs_to_project: 0.0,
+  belongs_to_phase: 0.0,
+  belongs_to_cycle: 0.0,
 };
 
 // ---------------------------------------------------------------------------

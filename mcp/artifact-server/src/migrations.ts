@@ -116,6 +116,33 @@ export const MIGRATIONS: Migration[] = [
       // No-op — additive DDL change, no data transforms needed.
     },
   },
+  {
+    fromVersion: 7,
+    toVersion: 8,
+    description:
+      "Added domain_decisions.derived_from column. Additive DDL, no data transform needed; " +
+      "existing rows get NULL derived_from which is correct (decisions authored before WI-905 " +
+      "had no such field).",
+    migrate: (ideateDir: string) => {
+      const dbPath = path.join(ideateDir, "index.db");
+      if (!fs.existsSync(dbPath)) return; // No DB yet — createSchema will handle it
+
+      const db = new Database(dbPath);
+      try {
+        const version = db.pragma("user_version", { simple: true }) as number;
+        if (version >= 8) return; // Already migrated
+
+        const cols = db.prepare(`PRAGMA table_info(domain_decisions)`).all() as Array<{ name: string }>;
+        if (!cols.some((c) => c.name === "derived_from")) {
+          db.exec(`ALTER TABLE domain_decisions ADD COLUMN derived_from TEXT`);
+        }
+
+        db.pragma(`user_version = 8`);
+      } finally {
+        db.close();
+      }
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------

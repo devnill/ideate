@@ -6,7 +6,7 @@ import * as fs from "fs";
 // ---------------------------------------------------------------------------
 
 // SQLite user_version for the artifact index schema. CONFIG_SCHEMA_VERSION in config.ts must stay synced (asserted by config.test.ts:46).
-export const CURRENT_SCHEMA_VERSION = 7;
+export const CURRENT_SCHEMA_VERSION = 8;
 
 // ---------------------------------------------------------------------------
 // Edge type enumeration
@@ -82,9 +82,9 @@ export const EDGE_TYPE_REGISTRY: Record<EdgeType, EdgeTypeSpec> = {
     yaml_field: "domain",
   },
   derived_from: {
-    description: "Domain policy is derived from a guiding principle",
-    source_types: ["domain_policy"],
-    target_types: ["guiding_principle"],
+    description: "Artifact is derived from a guiding principle, finding, or domain policy",
+    source_types: ["domain_policy", "domain_decision", "guiding_principle"],
+    target_types: ["guiding_principle", "finding", "domain_policy"],
     yaml_field: "derived_from",
   },
   relates_to: {
@@ -119,10 +119,15 @@ export const EDGE_TYPE_REGISTRY: Record<EdgeType, EdgeTypeSpec> = {
     yaml_field: "amended_by",
   },
   supersedes: {
-    description: "Domain decision supersedes an earlier decision",
+    description: "Artifact supersedes an earlier artifact of the same type. On domain_decision, the YAML field is 'supersedes'. On work_item, the YAML field is 'superseded_by' (reversed-direction naming — the newer item points to the older).",
     source_types: ["domain_decision"],
-    target_types: ["domain_decision"],
+    target_types: ["domain_decision", "work_item"],
     yaml_field: "supersedes",
+    /**
+     * work_item sources use the yaml field "superseded_by" (not "supersedes") to emit
+     * supersedes edges. See extractEdges in indexer.ts for the per-type override.
+     */
+    derivationPath: "work_item_superseded_by_field",
   },
   triggered_by: {
     description: "Proxy-human decision was triggered by a finding or work item",
@@ -491,14 +496,15 @@ export function createSchema(db: Database.Database): void {
     // -- domain_decisions --
     db.exec(`
       CREATE TABLE IF NOT EXISTS domain_decisions (
-        id          TEXT PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
-        domain      TEXT NOT NULL,
-        cycle       INTEGER,
-        supersedes  TEXT,
-        description TEXT,
-        rationale   TEXT,
-        title       TEXT,
-        source      TEXT
+        id           TEXT PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
+        domain       TEXT NOT NULL,
+        cycle        INTEGER,
+        supersedes   TEXT,
+        description  TEXT,
+        rationale    TEXT,
+        title        TEXT,
+        source       TEXT,
+        derived_from TEXT
       )
     `);
 

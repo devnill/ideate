@@ -489,14 +489,14 @@ describe("createSchema — node_file_refs table", () => {
 // ---------------------------------------------------------------------------
 
 describe("createSchema — schema version", () => {
-  it("CURRENT_SCHEMA_VERSION is 7", () => {
-    expect(CURRENT_SCHEMA_VERSION).toBe(7);
+  it("CURRENT_SCHEMA_VERSION is 8", () => {
+    expect(CURRENT_SCHEMA_VERSION).toBe(8);
   });
 
-  it("sets user_version = 7 after createSchema", () => {
+  it("sets user_version = 8 after createSchema", () => {
     const db = freshDb();
     const version = db.pragma("user_version", { simple: true }) as number;
-    expect(version).toBe(7);
+    expect(version).toBe(8);
   });
 });
 
@@ -696,15 +696,15 @@ describe("createSchema — work_items table", () => {
 // ---------------------------------------------------------------------------
 
 describe("createSchema — domain_decisions table", () => {
-  it("has all 8 expected columns", () => {
+  it("has all 9 expected columns", () => {
     const db = freshDb();
     const cols = columnNames(db, "domain_decisions");
-    for (const col of ["id", "domain", "cycle", "supersedes", "description", "rationale", "title", "source"]) {
+    for (const col of ["id", "domain", "cycle", "supersedes", "description", "rationale", "title", "source", "derived_from"]) {
       expect(cols, `expected domain_decisions to have column '${col}'`).toContain(col);
     }
   });
 
-  it("NOT NULL constraints: domain is required; cycle, supersedes, description, rationale, title, source are nullable", () => {
+  it("NOT NULL constraints: domain is required; cycle, supersedes, description, rationale, title, source, derived_from are nullable", () => {
     const db = freshDb();
     type ColInfo = { name: string; notnull: number };
     const colInfo = db.prepare("PRAGMA table_info('domain_decisions')").all() as ColInfo[];
@@ -716,7 +716,7 @@ describe("createSchema — domain_decisions table", () => {
     }
 
     // Nullable
-    for (const col of ["cycle", "supersedes", "description", "rationale", "title", "source"]) {
+    for (const col of ["cycle", "supersedes", "description", "rationale", "title", "source", "derived_from"]) {
       expect(byName[col], `expected '${col}' to be nullable`).toBe(0);
     }
   });
@@ -976,7 +976,7 @@ describe("checkSchemaVersion", () => {
     try {
       {
         const db = new Database(dbPath);
-        db.pragma("user_version = 99"); // stale — current is 6
+        db.pragma("user_version = 99"); // stale — current is 8
         db.close();
       }
 
@@ -1000,9 +1000,9 @@ describe("checkSchemaVersion", () => {
     }
   });
 
-  it("returns true when user_version matches CURRENT_SCHEMA_VERSION (6)", () => {
+  it("returns true when user_version matches CURRENT_SCHEMA_VERSION (8)", () => {
     const db = new Database(":memory:");
-    db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`); // 6
+    db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`); // 8
     const result = checkSchemaVersion(db, "/nonexistent/path/not/used.db");
     expect(result).toBe(true);
     db.close();
@@ -1365,6 +1365,80 @@ describe("CONTAINMENT_EDGE_TYPES — registry membership", () => {
         `semantic type '${t}' should NOT be in CONTAINMENT_EDGE_TYPES`
       ).toBe(false);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EDGE_TYPE_REGISTRY — supersedes entry (WI-905: extended to work_item)
+// ---------------------------------------------------------------------------
+
+describe("EDGE_TYPE_REGISTRY — supersedes entry", () => {
+  it("supersedes entry exists in EDGE_TYPE_REGISTRY", () => {
+    expect(EDGE_TYPE_REGISTRY).toHaveProperty("supersedes");
+  });
+
+  it("supersedes source_types is exactly ['domain_decision'] (work_item extracted via hand-wired indexer block)", () => {
+    expect(EDGE_TYPE_REGISTRY.supersedes.source_types).toEqual(["domain_decision"]);
+  });
+
+  it("supersedes source_types does NOT include work_item (work_item uses superseded_by field, hand-wired in indexer)", () => {
+    expect(EDGE_TYPE_REGISTRY.supersedes.source_types).not.toContain("work_item");
+  });
+
+  it("supersedes target_types includes domain_decision", () => {
+    expect(EDGE_TYPE_REGISTRY.supersedes.target_types).toContain("domain_decision");
+  });
+
+  it("supersedes target_types includes work_item (supersedes CAN target a work_item)", () => {
+    expect(EDGE_TYPE_REGISTRY.supersedes.target_types).toContain("work_item");
+  });
+
+  it("supersedes yaml_field remains 'supersedes'", () => {
+    expect(EDGE_TYPE_REGISTRY.supersedes.yaml_field).toBe("supersedes");
+  });
+
+  it("supersedes derivationPath is 'work_item_superseded_by_field'", () => {
+    expect(EDGE_TYPE_REGISTRY.supersedes.derivationPath).toBe("work_item_superseded_by_field");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EDGE_TYPE_REGISTRY — derived_from entry (WI-905: extended source/target types)
+// ---------------------------------------------------------------------------
+
+describe("EDGE_TYPE_REGISTRY — derived_from entry", () => {
+  it("derived_from entry exists in EDGE_TYPE_REGISTRY", () => {
+    expect(EDGE_TYPE_REGISTRY).toHaveProperty("derived_from");
+  });
+
+  it("derived_from source_types includes domain_policy (existing)", () => {
+    expect(EDGE_TYPE_REGISTRY.derived_from.source_types).toContain("domain_policy");
+  });
+
+  it("derived_from source_types includes domain_decision (existing)", () => {
+    expect(EDGE_TYPE_REGISTRY.derived_from.source_types).toContain("domain_decision");
+  });
+
+  it("derived_from source_types includes guiding_principle (WI-908)", () => {
+    // Regression guard: guiding_principle must remain in source_types so that
+    // principles with a derived_from field emit edges correctly.
+    expect(EDGE_TYPE_REGISTRY.derived_from.source_types).toContain("guiding_principle");
+  });
+
+  it("derived_from target_types includes guiding_principle (existing)", () => {
+    expect(EDGE_TYPE_REGISTRY.derived_from.target_types).toContain("guiding_principle");
+  });
+
+  it("derived_from target_types includes finding", () => {
+    expect(EDGE_TYPE_REGISTRY.derived_from.target_types).toContain("finding");
+  });
+
+  it("derived_from target_types includes domain_policy", () => {
+    expect(EDGE_TYPE_REGISTRY.derived_from.target_types).toContain("domain_policy");
+  });
+
+  it("derived_from yaml_field remains 'derived_from'", () => {
+    expect(EDGE_TYPE_REGISTRY.derived_from.yaml_field).toBe("derived_from");
   });
 });
 
