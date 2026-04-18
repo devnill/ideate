@@ -20,6 +20,7 @@ import type {
   NodeFilter,
   ToolUsageFilter,
   ToolUsageRow,
+  WorkspaceCheckReport,
 } from "../../adapter.js";
 import { indexFiles as indexerIndexFiles, removeFiles as indexerRemoveFiles } from "../../indexer.js";
 import { ValidationError } from "../../adapter.js";
@@ -183,6 +184,10 @@ export class LocalAdapter extends LocalWriterAdapter implements StorageAdapter {
 
   async getToolUsage(filter?: ToolUsageFilter): Promise<ToolUsageRow[]> {
     return this.reader.getToolUsage(filter);
+  }
+
+  async checkWorkspace(): Promise<WorkspaceCheckReport> {
+    return this.reader.checkWorkspace();
   }
 
 }

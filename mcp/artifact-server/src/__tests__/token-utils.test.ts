@@ -25,6 +25,11 @@ describe("estimateTokens", () => {
     expect(estimateTokens(s)).toBe(250);
   });
 
+  it("documented contract: 'hello world!' (12 chars) => 3 tokens", () => {
+    // Math.floor(12 / 4) = 3 — locks in the ±30% ASCII accuracy contract
+    expect(estimateTokens("hello world!")).toBe(3);
+  });
+
   it("returns an estimate for multi-byte UTF-8 text (documents the limitation)", () => {
     // JS string length counts UTF-16 code units, not bytes.
     // For common CJK characters each char is 1 code unit but 3 bytes in UTF-8.

@@ -31,6 +31,7 @@ import type {
   EdgeType,
   ToolUsageFilter,
   ToolUsageRow,
+  WorkspaceCheckReport,
 } from "../../adapter.js";
 import { ValidationError } from "../../adapter.js";
 
@@ -1070,6 +1071,173 @@ export class LocalReaderAdapter {
       : await query;
 
     return rows as ToolUsageRow[];
+  }
+
+  // -----------------------------------------------------------------------
+  // checkWorkspace — run four integrity checks against the local index + disk
+  // -----------------------------------------------------------------------
+
+  async checkWorkspace(): Promise<WorkspaceCheckReport> {
+    const db = this.db;
+    const ideateDir = this.ideateDir;
+
+    // -----------------------------------------------------------------------
+    // Internal file walker (mirrors indexer.ts walkDir)
+    // -----------------------------------------------------------------------
+    function walkDir(dir: string): string[] {
+      const results: string[] = [];
+      if (!fs.existsSync(dir)) return results;
+      function walk(current: string): void {
+        let entries: fs.Dirent[];
+        try {
+          entries = fs.readdirSync(current, { withFileTypes: true });
+        } catch {
+          return;
+        }
+        for (const entry of entries) {
+          const full = path.join(current, entry.name);
+          if (entry.isDirectory()) {
+            walk(full);
+          } else {
+            results.push(full);
+          }
+        }
+      }
+      walk(dir);
+      return results;
+    }
+
+    // -----------------------------------------------------------------------
+    // Check 1: Orphan nodes — rows in nodes with a file_path that does not
+    //          exist on disk.
+    // -----------------------------------------------------------------------
+    const allNodeRows = db
+      .prepare(`SELECT id, file_path FROM nodes WHERE file_path IS NOT NULL AND file_path != ''`)
+      .all() as Array<{ id: string; file_path: string }>;
+
+    const orphanIds: string[] = [];
+    for (const row of allNodeRows) {
+      if (!fs.existsSync(row.file_path)) {
+        orphanIds.push(row.id);
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Check 2: Unindexed YAML — YAML files on disk with no corresponding
+    //          node row (matched by file_path).
+    //          Paths are stored as relative paths (P-33: no absolute paths in
+    //          report output).
+    // -----------------------------------------------------------------------
+    const yamlFiles = walkDir(ideateDir).filter(
+      (f) => f.endsWith(".yaml") || f.endsWith(".yml")
+    );
+
+    const unindexedPaths: string[] = [];
+    for (const filePath of yamlFiles) {
+      const row = db
+        .prepare(`SELECT id FROM nodes WHERE file_path = ?`)
+        .get(filePath) as { id: string } | undefined;
+      if (!row) {
+        // Convert to relative path (P-33: no path leakage)
+        unindexedPaths.push(path.relative(ideateDir, filePath));
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Check 3: Dangling edges — edges where source_id or target_id is not
+    //          present in the nodes table.
+    // -----------------------------------------------------------------------
+    interface DanglingEdgeRow {
+      source_id: string;
+      target_id: string;
+      edge_type: string;
+    }
+
+    const danglingRows = db
+      .prepare(
+        `SELECT e.source_id, e.target_id, e.edge_type
+         FROM edges e
+         LEFT JOIN nodes ns ON ns.id = e.source_id
+         LEFT JOIN nodes nt ON nt.id = e.target_id
+         WHERE ns.id IS NULL OR nt.id IS NULL`
+      )
+      .all() as DanglingEdgeRow[];
+
+    const danglingExamples = danglingRows.map((r) => ({
+      source: r.source_id,
+      target: r.target_id,
+      type: r.edge_type,
+    }));
+
+    // -----------------------------------------------------------------------
+    // Check 4: Stale addressed_by — findings.addressed_by references a
+    //          work_item id that does not exist in nodes.
+    // -----------------------------------------------------------------------
+    interface FindingRow {
+      id: string;
+      addressed_by: string;
+    }
+
+    const findingsWithRef = db
+      .prepare(
+        `SELECT f.id, f.addressed_by
+         FROM findings f
+         WHERE f.addressed_by IS NOT NULL AND f.addressed_by != ''`
+      )
+      .all() as FindingRow[];
+
+    const staleExamples: Array<{ finding: string; work_item: string }> = [];
+    for (const row of findingsWithRef) {
+      const wiRow = db
+        .prepare(`SELECT id FROM nodes WHERE id = ?`)
+        .get(row.addressed_by) as { id: string } | undefined;
+      if (!wiRow) {
+        staleExamples.push({ finding: row.id, work_item: row.addressed_by });
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Assemble report
+    // -----------------------------------------------------------------------
+    const EXAMPLE_LIMIT = 10;
+
+    const orphanCount = orphanIds.length;
+    const unindexedCount = unindexedPaths.length;
+    const danglingCount = danglingExamples.length;
+    const staleCount = staleExamples.length;
+
+    const failedChecks = [orphanCount, unindexedCount, danglingCount, staleCount].filter(
+      (c) => c > 0
+    ).length;
+
+    const report: WorkspaceCheckReport = {
+      timestamp: new Date().toISOString(),
+      summary: {
+        total_checks: 4,
+        passed: 4 - failedChecks,
+        failed: failedChecks,
+      },
+      checks: {
+        orphan_nodes: {
+          count: orphanCount,
+          examples: orphanIds.slice(0, EXAMPLE_LIMIT),
+        },
+        unindexed_yaml: {
+          count: unindexedCount,
+          examples: unindexedPaths.slice(0, EXAMPLE_LIMIT),
+        },
+        dangling_edges: {
+          count: danglingCount,
+          examples: danglingExamples.slice(0, EXAMPLE_LIMIT),
+        },
+        stale_addressed_by: {
+          count: staleCount,
+          examples: staleExamples.slice(0, EXAMPLE_LIMIT),
+        },
+      },
+    };
+
+    return report;
   }
 
   // -----------------------------------------------------------------------

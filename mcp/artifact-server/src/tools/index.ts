@@ -12,6 +12,7 @@ import { handleGetArtifactContext, handleGetContextPackage, handleAssembleContex
 import { handleArtifactQuery, handleGetNextId } from "./query.js";
 import { handleGetExecutionStatus, handleGetReviewManifest } from "./execution.js";
 import { handleGetConvergenceStatus, handleGetDomainState, handleGetWorkspaceStatus } from "./analysis.js";
+import { handleCheckWorkspace } from "./diagnostics.js";
 import { handleAppendJournal, handleArchiveCycle, handleWriteWorkItems, handleUpdateWorkItems, handleWriteArtifact } from "./write.js";
 import { handleEmitEvent } from "./events.js";
 import { handleBootstrapWorkspace } from "./bootstrap.js";
@@ -234,6 +235,21 @@ export const TOOLS: Tool[] = [
           description: "View perspective. Default: workspace.",
         },
       },
+      required: [],
+    },
+    annotations: {
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  {
+    name: "ideate_check_workspace",
+    description:
+      "Run workspace integrity checks: orphan nodes, unindexed YAML, dangling edges, stale addressed_by. Returns structured report.",
+    inputSchema: {
+      type: "object",
+      properties: {},
       required: [],
     },
     annotations: {
@@ -705,6 +721,9 @@ export async function handleTool(
 
     case "ideate_get_workspace_status":
       return instrumentToolDispatch(ctx, name, _args, () => handleGetWorkspaceStatus(ctx, _args));
+
+    case "ideate_check_workspace":
+      return instrumentToolDispatch(ctx, name, _args, () => handleCheckWorkspace(ctx, _args));
 
     case "ideate_get_tool_usage":
       return instrumentToolDispatch(ctx, name, _args, () => handleGetToolUsage(ctx, _args));

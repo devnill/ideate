@@ -183,9 +183,18 @@ describe("runPendingMigrations", () => {
 // ---------------------------------------------------------------------------
 
 describe("runPendingMigrations — error path", () => {
-  it("records the error and leaves schema_version unchanged when a migration throws", () => {
+  it("propagates the error, leaves schema_version unchanged, creates snapshot, and calls log.error with snapshot path", () => {
     // Start at v4 so the v4→v5 migration would normally run
     writeConfig(ideateDir, { schema_version: 4 });
+
+    // Create a real index.db so snapshot can copy it
+    const dbPath = path.join(ideateDir, "index.db");
+    const db = new Database(dbPath);
+    db.exec("CREATE TABLE IF NOT EXISTS test (id TEXT PRIMARY KEY)");
+    db.close();
+
+    // Spy on log.error
+    const errorSpy = vi.spyOn(log, "error").mockImplementation(() => {});
 
     // Temporarily replace the v4→v5 migration's migrate function with one that throws
     const v4ToV5 = MIGRATIONS.find((m) => m.fromVersion === 4 && m.toVersion === 5);
@@ -196,21 +205,171 @@ describe("runPendingMigrations — error path", () => {
       throw new Error("simulated migration failure");
     };
 
-    try {
-      const result = runPendingMigrations(ideateDir);
+    let snapshotDir: string | undefined;
 
-      // Error should be recorded (not re-thrown)
-      expect(result.errors).toHaveLength(1);
-      expect(result.errors[0]).toContain("simulated migration failure");
-      expect(result.migrationsRun).toBe(0);
+    try {
+      expect(() => runPendingMigrations(ideateDir)).toThrow("simulated migration failure");
 
       // schema_version must remain at the pre-migration value
       const config = readRawConfig(ideateDir);
       expect(config.schema_version).toBe(4);
+
+      // A snapshot directory must have been created
+      const backupsDir = path.join(ideateDir, "backups");
+      expect(fs.existsSync(backupsDir)).toBe(true);
+      const entries = fs.readdirSync(backupsDir);
+      expect(entries).toHaveLength(1);
+      snapshotDir = path.join(backupsDir, entries[0]);
+
+      // Snapshot contains index.db
+      expect(fs.existsSync(path.join(snapshotDir, "index.db"))).toBe(true);
+
+      // log.error was called with the snapshot path
+      const errorCalls = errorSpy.mock.calls;
+      expect(errorCalls.some((args) => args[0] === "migrations" && String(args[1]).includes(snapshotDir!))).toBe(true);
     } finally {
       // Restore the original migrate function
       v4ToV5!.migrate = originalMigrate;
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Snapshot: exactly one snapshot created for a multi-step migration chain
+// ---------------------------------------------------------------------------
+
+describe("runPendingMigrations — snapshot behavior", () => {
+  it("creates exactly ONE snapshot directory when running a v4→v8 chain (not one per step)", () => {
+    writeConfig(ideateDir, { schema_version: 4 });
+
+    // Create a real index.db at user_version 4 (pre-migration state)
+    const dbPath = path.join(ideateDir, "index.db");
+    const db = new Database(dbPath);
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS work_items (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          complexity TEXT,
+          scope TEXT,
+          depends TEXT,
+          blocks TEXT,
+          criteria TEXT,
+          module TEXT,
+          domain TEXT,
+          phase TEXT,
+          notes TEXT,
+          work_item_type TEXT DEFAULT 'feature'
+        )
+      `);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS findings (
+          id TEXT PRIMARY KEY,
+          severity TEXT NOT NULL,
+          work_item TEXT NOT NULL,
+          file_refs TEXT,
+          verdict TEXT NOT NULL,
+          cycle INTEGER NOT NULL,
+          reviewer TEXT NOT NULL,
+          description TEXT,
+          suggestion TEXT,
+          addressed_by TEXT
+        )
+      `);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS domain_decisions (
+          id TEXT PRIMARY KEY,
+          domain TEXT NOT NULL,
+          cycle INTEGER,
+          supersedes TEXT,
+          description TEXT,
+          rationale TEXT
+        )
+      `);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS phases (
+          id TEXT PRIMARY KEY,
+          name TEXT,
+          description TEXT,
+          project TEXT NOT NULL,
+          phase_type TEXT NOT NULL,
+          intent TEXT NOT NULL,
+          steering TEXT,
+          status TEXT NOT NULL,
+          work_items TEXT
+        )
+      `);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS projects (
+          id TEXT PRIMARY KEY,
+          name TEXT,
+          description TEXT,
+          intent TEXT NOT NULL,
+          scope_boundary TEXT,
+          success_criteria TEXT,
+          appetite INTEGER,
+          steering TEXT,
+          horizon TEXT,
+          status TEXT NOT NULL
+        )
+      `);
+      db.pragma("user_version = 4");
+    } finally {
+      db.close();
+    }
+
+    const result = runPendingMigrations(ideateDir);
+
+    expect(result.errors).toHaveLength(0);
+    expect(result.migrationsRun).toBe(4);
+
+    // Exactly ONE snapshot directory must exist
+    const backupsDir = path.join(ideateDir, "backups");
+    expect(fs.existsSync(backupsDir)).toBe(true);
+    const entries = fs.readdirSync(backupsDir);
+    expect(entries).toHaveLength(1);
+
+    // The snapshot contains index.db (pre-migration state at v4)
+    const snapshotDir = path.join(backupsDir, entries[0]);
+    expect(fs.existsSync(path.join(snapshotDir, "index.db"))).toBe(true);
+
+    // The snapshot's DB is at user_version 4 (pre-migration)
+    const snapshotDb = new Database(path.join(snapshotDir, "index.db"));
+    try {
+      const version = snapshotDb.pragma("user_version", { simple: true }) as number;
+      expect(version).toBe(4);
+    } finally {
+      snapshotDb.close();
+    }
+  });
+
+  it("does NOT create a snapshot when already at target version (no migrations run)", () => {
+    writeConfig(ideateDir, { schema_version: 8 });
+
+    runPendingMigrations(ideateDir);
+
+    // No backups directory should be created when no migrations run
+    const backupsDir = path.join(ideateDir, "backups");
+    expect(fs.existsSync(backupsDir)).toBe(false);
+  });
+
+  it("calling runPendingMigrations a second time (already at latest) does NOT create an additional snapshot", () => {
+    writeConfig(ideateDir, { schema_version: 4 });
+
+    // First run: creates snapshot and migrates
+    const result1 = runPendingMigrations(ideateDir);
+    expect(result1.errors).toHaveLength(0);
+
+    const backupsDir = path.join(ideateDir, "backups");
+    const entriesAfterFirst = fs.existsSync(backupsDir) ? fs.readdirSync(backupsDir) : [];
+
+    // Second run: already at latest — no new snapshot
+    const result2 = runPendingMigrations(ideateDir);
+    expect(result2.migrationsRun).toBe(0);
+    expect(result2.errors).toHaveLength(0);
+
+    const entriesAfterSecond = fs.existsSync(backupsDir) ? fs.readdirSync(backupsDir) : [];
+    expect(entriesAfterSecond).toHaveLength(entriesAfterFirst.length);
   });
 });
 

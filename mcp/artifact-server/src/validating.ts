@@ -26,6 +26,7 @@ import {
   ImmutableFieldError,
   ToolUsageFilter,
   ToolUsageRow,
+  WorkspaceCheckReport,
 } from "./adapter.js";
 import type { EdgeType } from "./schema.js";
 
@@ -735,5 +736,10 @@ export class ValidatingAdapter implements StorageAdapter {
       );
     }
     return this.inner.appendJournalEntry(args);
+  }
+
+  async checkWorkspace(): Promise<WorkspaceCheckReport> {
+    // Pass through — no input to validate; output shape is guaranteed by the inner adapter.
+    return this.inner.checkWorkspace();
   }
 }

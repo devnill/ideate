@@ -4,9 +4,10 @@ phase_type: implementation
 project: PR-004
 status: pending
 name: Polish + hygiene
-description: Close the remaining Minor findings and documentation drift items.
+description: Close remaining Minor findings, documentation drift, and follow-ups from earlier phases.
 work_items:
   - WI-904
+  - WI-916
 success_criteria:
   - tsc strict flags enabled (noUnusedLocals, noUnusedParameters) with existing violations resolved
   - vitest.config.ts forceExit removed; any hanging handles fixed at source
@@ -14,7 +15,8 @@ success_criteria:
   - plan.complete event fires at the end of /ideate:refine
   - CONTRIBUTING.md documents node-type-addition checklist
   - upsertExtensionTableRow refactored to registry-driven dispatch (WI-904)
+  - Worker GP-14 enforcement structural via settings.json permission deny rules (WI-916)
   - Remaining code-quality minors addressed or explicitly deferred
 cycle_modified: 27
-content_hash: 2649ba4a85c8995b0bfcbddef34a38c1aeab0dd8511883d070cda982cb435f44
-token_count: 216
+content_hash: 22979ba764f62fe63be2b8d42a1626869a962822d0f3c0408eeb9e59816e782f
+token_count: 247

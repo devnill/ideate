@@ -30,6 +30,7 @@ import type {
   AdapterConfig,
   ToolUsageFilter,
   ToolUsageRow,
+  WorkspaceCheckReport,
 } from "../../adapter.js";
 
 import { ConnectionError, ValidationError, StorageAdapterError } from "../../adapter.js";
@@ -1510,5 +1511,15 @@ export class RemoteAdapter implements StorageAdapter {
       "getToolUsage: stub returning [] (remote backend does not yet expose tool_usage endpoint)"
     );
     return [];
+  }
+
+  // TODO: implement checkWorkspace for the remote backend once the GraphQL
+  // API exposes workspace integrity endpoints.
+  async checkWorkspace(): Promise<WorkspaceCheckReport> {
+    this.assertNotShutDown();
+    throw new StorageAdapterError(
+      "NOT_SUPPORTED",
+      "checkWorkspace not yet implemented for remote backend"
+    );
   }
 }

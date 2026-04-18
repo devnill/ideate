@@ -8,7 +8,7 @@ import { createHash } from "crypto";
 import { stringify } from "yaml";
 import { createSchema } from "../schema.js";
 import * as dbSchema from "../db.js";
-import { rebuildIndex, detectCycles, indexFiles, removeFiles, deriveJournalEntryCycleEdges, deriveJournalEntryEdges, MAX_DEPENDENCY_NODES, MAX_DEPENDENCY_EDGES } from "../indexer.js";
+import { rebuildIndex, detectCycles, indexFiles, removeFiles, deriveJournalEntryCycleEdges, deriveJournalEntryEdges, MAX_DEPENDENCY_NODES, MAX_DEPENDENCY_EDGES, readAndPrepare, upsertPrepared, type PreparedNode } from "../indexer.js";
 import { computeArtifactHash, upsertNode, upsertJournalEntry, upsertDocumentArtifact } from "../db-helpers.js";
 
 // ---------------------------------------------------------------------------
@@ -2735,5 +2735,124 @@ describe("registry source_types enforcement — derived_from", () => {
       )
       .get();
     expect(edge).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fs-out-of-transaction pattern regression tests (WI-896)
+// ---------------------------------------------------------------------------
+
+describe("fs-out-of-transaction — readAndPrepare returns PreparedNode without touching DB", () => {
+  it("readAndPrepare returns prepared node with correct fields for a valid work_item YAML", () => {
+    const db = freshDb();
+    const yamlContent = minimalWorkItem({ id: "WI-TEST-896", title: "WI-896 regression" });
+    const filePath = path.join(tmpDir, "WI-TEST-896.yaml");
+    fs.writeFileSync(filePath, yamlContent, "utf8");
+
+    // The hash-check statement is a pure read on the nodes table.
+    // For a fresh DB with no rows, it returns undefined (file not in index yet).
+    const hashCheckStmt = db.prepare(`SELECT id, content_hash FROM nodes WHERE file_path = ?`);
+
+    const result = readAndPrepare(filePath, hashCheckStmt);
+
+    expect(result.kind).toBe("prepared");
+    if (result.kind !== "prepared") return; // narrow type for TS
+    expect(result.node.nodeId).toBe("WI-TEST-896");
+    expect(result.node.typeField).toBe("work_item");
+    expect(result.node.filePath).toBe(filePath);
+    // No SQL has been performed — nodes table is still empty
+    const row = db.prepare("SELECT id FROM nodes WHERE id = 'WI-TEST-896'").get();
+    expect(row).toBeUndefined();
+  });
+
+  it("readAndPrepare returns skip for a file already indexed with the same content", () => {
+    const db = freshDb();
+    const ideateDir = makeIdeateDir(tmpDir);
+    const wiDir = path.join(ideateDir, "work-items");
+    writeYaml(wiDir, "WI-001.yaml", minimalWorkItem({ id: "WI-001" }));
+
+    // First rebuild populates the DB
+    rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
+
+    const hashCheckStmt = db.prepare(`SELECT id, content_hash FROM nodes WHERE file_path = ?`);
+    const filePath = path.join(wiDir, "WI-001.yaml");
+    const result = readAndPrepare(filePath, hashCheckStmt);
+
+    expect(result.kind).toBe("skip");
+  });
+
+  it("readAndPrepare returns error for invalid YAML without performing any SQL", () => {
+    const db = freshDb();
+    const filePath = path.join(tmpDir, "bad.yaml");
+    fs.writeFileSync(filePath, "{ invalid yaml: [unclosed", "utf8");
+
+    const hashCheckStmt = db.prepare(`SELECT id, content_hash FROM nodes WHERE file_path = ?`);
+    const result = readAndPrepare(filePath, hashCheckStmt);
+
+    expect(result.kind).toBe("error");
+    if (result.kind !== "error") return;
+    expect(result.error).toContain("bad.yaml");
+    // DB remains untouched
+    const count = (db.prepare("SELECT COUNT(*) as n FROM nodes").get() as { n: number }).n;
+    expect(count).toBe(0);
+  });
+
+  it("upsertPrepared writes the node row only after readAndPrepare produces a PreparedNode", () => {
+    const db = freshDb();
+    const drizzleDb = drizzle(db, { schema: dbSchema });
+    const yamlContent = minimalWorkItem({ id: "WI-UP-001", title: "upsertPrepared test" });
+    const filePath = path.join(tmpDir, "WI-UP-001.yaml");
+    fs.writeFileSync(filePath, yamlContent, "utf8");
+
+    const hashCheckStmt = db.prepare(`SELECT id, content_hash FROM nodes WHERE file_path = ?`);
+    const result = readAndPrepare(filePath, hashCheckStmt);
+    expect(result.kind).toBe("prepared");
+    if (result.kind !== "prepared") return;
+
+    // Confirm node is absent before SQL phase
+    expect(db.prepare("SELECT id FROM nodes WHERE id = 'WI-UP-001'").get()).toBeUndefined();
+
+    // Run the SQL phase inside a transaction (as the callers do)
+    db.transaction(() => { upsertPrepared(drizzleDb, result.node); })();
+
+    // Confirm node is present after SQL phase
+    const row = db.prepare("SELECT id FROM nodes WHERE id = 'WI-UP-001'").get() as { id: string } | undefined;
+    expect(row).toBeDefined();
+    expect(row!.id).toBe("WI-UP-001");
+  });
+
+  it("rebuildIndex over N files: all nodes indexed, two-phase correctness", () => {
+    // Seed a workspace with N work-item files and verify that rebuildIndex
+    // correctly indexes all of them with the two-phase pattern.
+    // Correctness guarantee: stats.files_updated equals the number of files
+    // written — meaning readAndPrepare ran for all files before the SQL
+    // transaction opened, and upsertPrepared ran for all of them inside it.
+    const N = 5;
+    const db = freshDb();
+    const ideateDir = makeIdeateDir(tmpDir);
+    const wiDir = path.join(ideateDir, "work-items");
+
+    for (let i = 1; i <= N; i++) {
+      const id = `WI-${String(i).padStart(3, "0")}`;
+      writeYaml(wiDir, `${id}.yaml`, minimalWorkItem({ id, title: `Item ${i}` }));
+    }
+
+    const stats = rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
+
+    expect(stats.files_scanned).toBe(N);
+    expect(stats.files_updated).toBe(N);
+    expect(stats.files_failed).toBe(0);
+
+    // Verify all nodes landed in the DB
+    const rows = db.prepare("SELECT id FROM nodes WHERE type = 'work_item' ORDER BY id").all() as Array<{ id: string }>;
+    expect(rows).toHaveLength(N);
+    for (let i = 1; i <= N; i++) {
+      expect(rows[i - 1].id).toBe(`WI-${String(i).padStart(3, "0")}`);
+    }
+
+    // Second call: no changes — files_updated must be 0, proving the hash-check
+    // (which runs in readAndPrepare, outside the transaction) short-circuits correctly.
+    const stats2 = rebuildIndex(db, drizzle(db, { schema: dbSchema }), ideateDir);
+    expect(stats2.files_updated).toBe(0);
   });
 });

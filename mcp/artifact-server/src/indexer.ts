@@ -640,38 +640,73 @@ export function detectCycles(drizzleDb: DrizzleDb): string[][] {
 }
 
 // ---------------------------------------------------------------------------
-// Single-file index helper (shared by rebuildIndex and indexFiles)
+// Two-phase single-file index helper (shared by rebuildIndex and indexFiles)
 // ---------------------------------------------------------------------------
 
-interface IndexSingleFileResult {
-  nodeId: string | null;
-  updated: boolean;
-  failed: boolean;
-  error: string | null;
-  edgesCreated: number;
+/**
+ * All data computed from filesystem + YAML parsing that is needed for the SQL
+ * upsert phase.  Produced by readAndPrepare(); consumed by upsertPrepared().
+ * Keeping these two steps separate means the SQLite write lock is never held
+ * while doing filesystem I/O.
+ *
+ * Exported for unit testing.
+ */
+export interface PreparedNode {
+  filePath: string;
+  nodeId: string;
+  typeField: string;
+  tableName: string;
+  nodeRow: NodeRow;
+  extRow: Row;
+  doc: Row;
+  /** Prepared rows for embedded interview_question entries, if any */
+  interviewEntries: Array<{
+    entryId: string;
+    entryNodeRow: NodeRow;
+    entryExtRow: Record<string, unknown>;
+    entryDoc: Row;
+  }>;
 }
 
-function indexSingleFile(
-  db: Database.Database,
-  drizzleDb: DrizzleDb,
+/**
+ * The result of readAndPrepare for a single file.  Three outcomes:
+ * - `{ kind: "skip"; nodeId: string | null }` — file unchanged or unreadable, no SQL needed
+ * - `{ kind: "error"; error: string }` — parse failure, caller should record as failed
+ * - `{ kind: "prepared"; node: PreparedNode }` — ready for upsertPrepared()
+ *
+ * Exported for unit testing.
+ */
+export type ReadAndPrepareResult =
+  | { kind: "skip"; nodeId: string | null }
+  | { kind: "error"; error: string }
+  | { kind: "prepared"; node: PreparedNode };
+
+/**
+ * Phase 1 of indexing: filesystem I/O + YAML parsing + hash computation.
+ * NO SQL is performed here.  The returned PreparedNode (if any) is passed to
+ * upsertPrepared() inside a transaction.
+ *
+ * Exported for unit testing.
+ */
+export function readAndPrepare(
   filePath: string,
   hashCheckStmt: Database.Statement
-): IndexSingleFileResult {
+): ReadAndPrepareResult {
   let content: string;
   try {
     content = fs.readFileSync(filePath, "utf8");
   } catch {
-    return { nodeId: null, updated: false, failed: false, error: null, edgesCreated: 0 };
+    return { kind: "skip", nodeId: null };
   }
 
   // Parse YAML first so we can compute a stable hash that excludes metadata fields
   // (content_hash, token_count, file_path). This matches the exclusion pattern used
   // by write handlers so that rebuildIndex and handleWriteArtifact produce identical
   // content_hash values for the same logical content.
-  const parseResult = safeParseYaml(content, filePath, "indexSingleFile");
+  const parseResult = safeParseYaml(content, filePath, "readAndPrepare");
   if (!parseResult.parsed || typeof parseResult.parsed !== "object") {
     const errorMsg = parseResult.errorMessage ?? "unknown parse error";
-    return { nodeId: null, updated: false, failed: true, error: `${filePath}: YAML parse error - ${errorMsg}`, edgesCreated: 0 };
+    return { kind: "error", error: `${filePath}: YAML parse error - ${errorMsg}` };
   }
 
   const doc = parseResult.parsed as Row;
@@ -685,36 +720,26 @@ function indexSingleFile(
 
   // Skip if unchanged
   if (storedHash === hash) {
-    return { nodeId: storedId, updated: false, failed: false, error: null, edgesCreated: 0 };
+    return { kind: "skip", nodeId: storedId };
   }
 
   const typeField = toStrOrNull(doc.type);
   if (!typeField) {
-    return { nodeId: null, updated: false, failed: true, error: `${filePath}: missing type field`, edgesCreated: 0 };
+    return { kind: "error", error: `${filePath}: missing type field` };
   }
 
   const extensionTable = TYPE_TO_EXTENSION_TABLE[typeField];
   if (!extensionTable) {
-    return { nodeId: null, updated: false, failed: true, error: `${filePath}: unknown type '${typeField}'`, edgesCreated: 0 };
+    return { kind: "error", error: `${filePath}: unknown type '${typeField}'` };
   }
 
   const tableName = getTableName(extensionTable);
-
   const nodeRow = buildNodeRow(doc, content, filePath, hash);
   const nodeId = nodeRow.id as string;
   const extRow = buildExtensionRow(tableName, doc);
 
-  upsertNode(drizzleDb, nodeRow);
-  upsertExtensionRow(drizzleDb, tableName, nodeId, extRow);
-
-  // Delete old edges and file refs before re-inserting
-  deleteEdgesBySourceId(drizzleDb, nodeId);
-  deleteFileRefsByNodeId(drizzleDb, nodeId);
-
-  let edgesCreated = extractEdges(drizzleDb, doc, nodeId, typeField);
-  extractFileRefs(drizzleDb, doc, nodeId, typeField);
-
-  // Special handling for interview files with an entries array
+  // Pre-compute embedded interview_question entries (pure data, no SQL)
+  const interviewEntries: PreparedNode["interviewEntries"] = [];
   if (typeField === "interview" && Array.isArray(doc.entries)) {
     for (const entry of doc.entries) {
       if (!entry || typeof entry !== "object") continue;
@@ -739,17 +764,49 @@ function indexSingleFile(
         domain: toStrOrNull(entryDoc.domain),
         seq: toNumOrNull(entryDoc.seq) ?? 0,
       };
-
-      upsertNode(drizzleDb, entryNodeRow);
-      upsertExtensionRow(drizzleDb, "interview_questions", entryId, entryExtRow);
-      deleteEdgesBySourceId(drizzleDb, entryId);
-      edgesCreated += extractEdges(drizzleDb, entryDoc, entryId, "interview_question");
-      insertEdge(drizzleDb, { source_id: entryId, target_id: nodeId, edge_type: "references", props: null });
-      edgesCreated++;
+      interviewEntries.push({ entryId, entryNodeRow, entryExtRow, entryDoc });
     }
   }
 
-  return { nodeId, updated: true, failed: false, error: null, edgesCreated };
+  return {
+    kind: "prepared",
+    node: { filePath, nodeId, typeField, tableName, nodeRow, extRow, doc, interviewEntries },
+  };
+}
+
+/**
+ * Phase 2 of indexing: pure SQL upsert.  Must be called inside a transaction.
+ * Performs no filesystem I/O — all data comes from the PreparedNode produced
+ * by readAndPrepare().
+ *
+ * Returns the number of edges created.
+ *
+ * Exported for unit testing.
+ */
+export function upsertPrepared(drizzleDb: DrizzleDb, prepared: PreparedNode): number {
+  const { nodeId, typeField, tableName, nodeRow, extRow, doc, interviewEntries } = prepared;
+
+  upsertNode(drizzleDb, nodeRow);
+  upsertExtensionRow(drizzleDb, tableName, nodeId, extRow);
+
+  // Delete old edges and file refs before re-inserting
+  deleteEdgesBySourceId(drizzleDb, nodeId);
+  deleteFileRefsByNodeId(drizzleDb, nodeId);
+
+  let edgesCreated = extractEdges(drizzleDb, doc, nodeId, typeField);
+  extractFileRefs(drizzleDb, doc, nodeId, typeField);
+
+  // Upsert embedded interview_question entries
+  for (const { entryId, entryNodeRow, entryExtRow, entryDoc } of interviewEntries) {
+    upsertNode(drizzleDb, entryNodeRow);
+    upsertExtensionRow(drizzleDb, "interview_questions", entryId, entryExtRow);
+    deleteEdgesBySourceId(drizzleDb, entryId);
+    edgesCreated += extractEdges(drizzleDb, entryDoc, entryId, "interview_question");
+    insertEdge(drizzleDb, { source_id: entryId, target_id: nodeId, edge_type: "references", props: null });
+    edgesCreated++;
+  }
+
+  return edgesCreated;
 }
 
 // ---------------------------------------------------------------------------
@@ -778,25 +835,37 @@ export function indexFiles(
 
   const hashCheckStmt = db.prepare(`SELECT id, content_hash FROM nodes WHERE file_path = ?`);
 
-  const fkWasOn = db.pragma('foreign_keys', { simple: true }) as number;
-  if (fkWasOn) db.pragma('foreign_keys = OFF');
+  // Phase A: filesystem I/O + YAML parsing — outside any transaction so the
+  // SQLite write lock is not held during file reads.
+  const preparedNodes: PreparedNode[] = [];
+  for (const filePath of yamlPaths) {
+    const r = readAndPrepare(filePath, hashCheckStmt);
+    if (r.kind === "error") {
+      result.failed++;
+      result.errors.push(r.error);
+    } else if (r.kind === "prepared") {
+      preparedNodes.push(r.node);
+    }
+    // "skip" — do nothing
+  }
 
-  try {
-    const upsertPhase = db.transaction(() => {
-      for (const filePath of yamlPaths) {
-        const r = indexSingleFile(db, drizzleDb, filePath, hashCheckStmt);
-        if (r.failed) {
-          result.failed++;
-          if (r.error) result.errors.push(r.error);
-        } else if (r.updated) {
+  if (preparedNodes.length > 0) {
+    const fkWasOn = db.pragma('foreign_keys', { simple: true }) as number;
+    if (fkWasOn) db.pragma('foreign_keys = OFF');
+
+    try {
+      // Phase B: SQL upserts — transaction wraps only SQL operations, not file I/O.
+      const upsertPhase = db.transaction(() => {
+        for (const prepared of preparedNodes) {
+          upsertPrepared(drizzleDb, prepared);
           result.updated++;
         }
-      }
-    });
-    upsertPhase();
+      });
+      upsertPhase();
 
-  } finally {
-    if (fkWasOn) db.pragma('foreign_keys = ON');
+    } finally {
+      if (fkWasOn) db.pragma('foreign_keys = ON');
+    }
   }
 
   // Re-derive journal entry edges when journal entries, cycle_summaries, or
@@ -804,6 +873,8 @@ export function indexFiles(
   // Journal entries: /cycles/{NNN}/journal/*.yaml
   // Cycle summaries: /cycles/{NNN}/*.yaml (excludes journal/ subdirectory)
   // Work items: /work-items/WI-{NNN}.yaml
+  // NOTE: derivation runs even for unchanged (skipped) files, matching the
+  // original behaviour — the caller may have changed something externally.
   const hasDerivedEdgeUpdate = yamlPaths.some(
     p =>
       /\/cycles\/\d+\/journal\//.test(p) ||
@@ -952,11 +1023,43 @@ export function rebuildIndex(db: Database.Database, drizzleDb: DrizzleDb, ideate
   // Collect IDs of all rows that should be kept (their source file still exists)
   const keepIds: string[] = [];
 
-  // Pre-create prepared statements outside the file loop
+  // Pre-create hash-check statement outside the file loop (read-only, safe outside tx)
   const hashCheckStmt = db.prepare(`SELECT id, content_hash FROM nodes WHERE file_path = ?`);
-  const interviewEntryStmt = db.prepare(`SELECT id FROM nodes WHERE file_path = ? AND type = 'interview_question'`);
 
-  // Phase 1: upsert all nodes, extension tables, edges, and file refs.
+  // Phase 1 (I/O): read all files and parse YAML outside any transaction so the
+  // SQLite write lock is not held during filesystem reads.  For large workspaces
+  // this is the dominant latency source — keeping I/O out of the transaction
+  // allows concurrent readers to proceed unblocked.
+  const preparedNodes: PreparedNode[] = [];
+  for (const filePath of yamlFiles) {
+    const r = readAndPrepare(filePath, hashCheckStmt);
+    if (r.kind === "error") {
+      stats.files_failed++;
+      stats.parse_errors.push(r.error);
+    } else if (r.kind === "prepared") {
+      keepIds.push(r.node.nodeId);
+      // Collect IDs for embedded interview_question entries
+      for (const e of r.node.interviewEntries) {
+        keepIds.push(e.entryId);
+      }
+      preparedNodes.push(r.node);
+    } else {
+      // "skip" — file unchanged; still need to keep its existing nodeId
+      if (r.nodeId !== null) {
+        keepIds.push(r.nodeId);
+        // For interview files that were skipped, we must also keep their entry IDs.
+        // These are re-queried from the DB since we didn't re-parse the file.
+        const entryRows = db
+          .prepare(`SELECT id FROM nodes WHERE file_path = ? AND type = 'interview_question'`)
+          .all(filePath) as Array<{ id: string }>;
+        for (const er of entryRows) {
+          keepIds.push(er.id);
+        }
+      }
+    }
+  }
+
+  // Phase 2 (SQL upserts): transaction wraps only SQL operations, not file I/O.
   // FK enforcement is turned OFF for this phase so that edges may reference
   // logical identifiers (domain names, module IDs) that are not themselves
   // indexed artifacts. Turning FK off must happen outside the transaction
@@ -965,25 +1068,10 @@ export function rebuildIndex(db: Database.Database, drizzleDb: DrizzleDb, ideate
   if (fkWasOn) db.pragma('foreign_keys = OFF');
 
   const upsertPhase = db.transaction(() => {
-    for (const filePath of yamlFiles) {
-      const r = indexSingleFile(db, drizzleDb, filePath, hashCheckStmt);
-      if (r.nodeId !== null) {
-        keepIds.push(r.nodeId);
-        // For interview entries, also collect their IDs
-        // (indexSingleFile handles entry upsert but we need their IDs for keepIds)
-        // Re-query for any interview_question nodes with this file_path
-        const entryRows = interviewEntryStmt.all(filePath) as Array<{ id: string }>;
-        for (const er of entryRows) {
-          keepIds.push(er.id);
-        }
-      }
-      if (r.failed) {
-        stats.files_failed++;
-        if (r.error) stats.parse_errors.push(r.error);
-      } else if (r.updated) {
-        stats.files_updated++;
-        stats.edges_created += r.edgesCreated;
-      }
+    for (const prepared of preparedNodes) {
+      const edgesCreated = upsertPrepared(drizzleDb, prepared);
+      stats.files_updated++;
+      stats.edges_created += edgesCreated;
     }
   });
 

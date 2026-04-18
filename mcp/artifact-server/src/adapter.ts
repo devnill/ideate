@@ -500,6 +500,19 @@ export interface StorageAdapter {
    */
   getToolUsage(filter?: ToolUsageFilter): Promise<ToolUsageRow[]>;
 
+  /**
+   * Run workspace integrity checks against the local SQLite index and YAML files.
+   *
+   * Runs four checks:
+   *   1. Orphan nodes — node rows with no corresponding YAML file on disk.
+   *   2. Unindexed YAML — YAML files on disk not present in the nodes table.
+   *   3. Dangling edges — edges whose source_id or target_id does not exist in nodes.
+   *   4. Stale addressed_by — findings.addressed_by references a non-existent work_item.
+   *
+   * RemoteAdapter: throws StorageAdapterError("NOT_SUPPORTED", …) — not yet implemented.
+   */
+  checkWorkspace(): Promise<WorkspaceCheckReport>;
+
   // -----------------------------------------------------------------------
   // Lifecycle
   // -----------------------------------------------------------------------
@@ -562,6 +575,30 @@ export interface StorageAdapter {
     body: string;
     cycle: number;
   }): Promise<string>;
+}
+
+// ---------------------------------------------------------------------------
+// Workspace check report types
+// ---------------------------------------------------------------------------
+
+export interface WorkspaceCheckDetail<T> {
+  count: number;
+  examples: T[];
+}
+
+export interface WorkspaceCheckReport {
+  timestamp: string;
+  summary: {
+    total_checks: 4;
+    passed: number;
+    failed: number;
+  };
+  checks: {
+    orphan_nodes: WorkspaceCheckDetail<string>;
+    unindexed_yaml: WorkspaceCheckDetail<string>;
+    dangling_edges: WorkspaceCheckDetail<{ source: string; target: string; type: string }>;
+    stale_addressed_by: WorkspaceCheckDetail<{ finding: string; work_item: string }>;
+  };
 }
 
 // ---------------------------------------------------------------------------

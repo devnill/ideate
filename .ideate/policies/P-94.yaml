@@ -1,0 +1,18 @@
+id: P-94
+type: domain_policy
+title: Workers write .ideate/ artifacts exclusively through MCP; filesystem access to .ideate/ is blocked by agent tool configuration
+domain: agent-system
+status: active
+derived_from:
+  - GP-14
+description: "Workers may not write .ideate/ files via filesystem tools (Edit, Write). All artifact writes go through MCP (ideate_write_artifact, ideate_update_work_items, ideate_append_journal, etc.). This is enforced at the agent configuration level — worker.md includes deny rules blocking Edit/Write on .ideate/ paths. Rationale: GP-14 preservation requires structural enforcement. Prior to this policy, workers had filesystem Edit/Write access to .ideate/ with no gate; cycle 82 WI-911 demonstrated the drift risk (worker used Edit on architecture.yaml directly)."
+source: cycle 82 capstone GP-14 violation (WI-911)
+established_cycle: 82
+rule: Workers must use MCP artifact tools (ideate_write_artifact, ideate_update_work_items, ideate_append_journal, etc.) for all writes to .ideate/ artifacts. Direct filesystem writes to .ideate/ via Edit or Write tools are blocked by agent tool configuration (disallowedTools in worker.md).
+rationale: GP-14 preservation requires structural enforcement, not just documentation. Prior to this policy, workers had filesystem Edit/Write access to .ideate/ with no gate. Cycle 82 WI-911 demonstrated the drift risk when a worker used Edit on architecture.yaml directly instead of going through MCP.
+applies_to:
+  - agents/worker.md
+  - any worker agent implementation
+cycle_modified: 27
+content_hash: 8e8f38164ad7da1a7cbfe197d854ce0a508e1f05e32cd6366b6d060f7d6c06b2
+token_count: 387

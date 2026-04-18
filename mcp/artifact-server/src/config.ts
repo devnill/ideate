@@ -25,6 +25,7 @@ export interface IdeateConfigJson {
     convergence_threshold?: number;
     edge_type_weights?: Record<string, number>;
     default_token_budget?: number;
+    max_hops?: number;
   };
   /** Storage backend selection. Default: "local". */
   backend?: BackendType;
@@ -92,6 +93,7 @@ export const DEFAULT_PPR_CONFIG = {
     blocks: 0.3,
   },
   default_token_budget: 50000,
+  max_hops: 4,
 };
 
 /**
@@ -276,6 +278,7 @@ export function getConfigWithDefaults(ideateDir: string): Required<
     },
     default_token_budget:
       rawPpr.default_token_budget ?? DEFAULT_PPR_CONFIG.default_token_budget,
+    max_hops: rawPpr.max_hops ?? DEFAULT_PPR_CONFIG.max_hops,
   };
 
   const model_overrides: Record<string, string> = {

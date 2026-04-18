@@ -81,7 +81,7 @@ describe("computePPR — single seed", () => {
     insertEdge("SEED", "DISTANT", "depends_on");
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"]);
+    const results = computePPR(drizzleDb, db, ["SEED"]);
 
     expect(results.length).toBeGreaterThan(0);
 
@@ -105,7 +105,7 @@ describe("computePPR — single seed", () => {
   it("returns empty array when no seeds provided", () => {
     insertNode("A");
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, []);
+    const results = computePPR(drizzleDb, db, []);
     expect(results).toEqual([]);
   });
 });
@@ -132,7 +132,7 @@ describe("computePPR — multiple seeds", () => {
     insertEdge("B", "D", "depends_on");
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["A", "B"]);
+    const results = computePPR(drizzleDb, db, ["A", "B"]);
 
     // Both seeds should appear in results
     const nodeIds = results.map((r) => r.nodeId);
@@ -149,7 +149,9 @@ describe("computePPR — multiple seeds", () => {
 
   it("scores from both seeds propagate to shared neighbours", () => {
     // A → SHARED ← B
-    // FAR is connected only via a weak link from a non-seed node
+    // FRINGE is connected only via a weak link from LEAF; neither A nor B
+    // connects to LEAF, so FRINGE is NOT reachable from the seeds within
+    // MAX_HOPS hops and is excluded from the BFS subgraph entirely.
     insertNode("A");
     insertNode("B");
     insertNode("SHARED");
@@ -157,19 +159,22 @@ describe("computePPR — multiple seeds", () => {
     insertNode("LEAF");
     insertEdge("A", "SHARED", "depends_on");
     insertEdge("B", "SHARED", "depends_on");
-    // FRINGE is far from both seeds — reachable only through LEAF which connects
-    // to FRINGE but neither A nor B point to LEAF
+    // FRINGE is disconnected from seeds — reachable only through LEAF which
+    // has no path back to A or B
     insertEdge("LEAF", "FRINGE", "references"); // low-weight edge type
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["A", "B"]);
+    const results = computePPR(drizzleDb, db, ["A", "B"]);
 
     const scoreShared = results.find((r) => r.nodeId === "SHARED")!.score;
-    const scoreFringe = results.find((r) => r.nodeId === "FRINGE")!.score;
+    const fringeResult = results.find((r) => r.nodeId === "FRINGE");
 
-    // SHARED receives contributions from both seeds; FRINGE is unreachable
-    // from the seeds in one hop and gets minimal score
-    expect(scoreShared).toBeGreaterThan(scoreFringe);
+    // SHARED receives contributions from both seeds; it must have a positive score.
+    expect(scoreShared).toBeGreaterThan(0);
+
+    // FRINGE is unreachable from the seeds via the BFS pre-filter — it must not
+    // appear in results at all (BFS excludes it from the visited set).
+    expect(fringeResult).toBeUndefined();
   });
 });
 
@@ -190,8 +195,8 @@ describe("computePPR — convergence", () => {
     insertEdge("N4", "N1", "depends_on"); // cycle back
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results1 = computePPR(drizzleDb, ["N1"]);
-    const results2 = computePPR(drizzleDb, ["N1"]);
+    const results1 = computePPR(drizzleDb, db, ["N1"]);
+    const results2 = computePPR(drizzleDb, db, ["N1"]);
 
     // Results should be deterministic
     expect(results1.length).toBe(results2.length);
@@ -210,11 +215,11 @@ describe("computePPR — convergence", () => {
 
     // With a very loose threshold the algorithm stops in 1 iteration
     const looseOpts: PPROptions = { maxIterations: 1, convergenceThreshold: 1.0 };
-    const resultsLoose = computePPR(drizzleDb, ["X"], looseOpts);
+    const resultsLoose = computePPR(drizzleDb, db, ["X"], looseOpts);
 
     // With many iterations it should fully converge
     const tightOpts: PPROptions = { maxIterations: 100, convergenceThreshold: 1e-10 };
-    const resultsTight = computePPR(drizzleDb, ["X"], tightOpts);
+    const resultsTight = computePPR(drizzleDb, db, ["X"], tightOpts);
 
     // Both should contain the same nodes
     const idsLoose = new Set(resultsLoose.map((r) => r.nodeId));
@@ -238,7 +243,7 @@ describe("computePPR — edge type weighting", () => {
     insertEdge("S", "LOW", "references");  // weight 0.4
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["S"], {
+    const results = computePPR(drizzleDb, db, ["S"], {
       edgeTypeWeights: { depends_on: 1.0, references: 0.4 },
       maxIterations: 20,
     });
@@ -258,7 +263,7 @@ describe("computePPR — edge type weighting", () => {
     insertEdge("S", "B", "type_beta");  // custom type, will get weight 0.1
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["S"], {
+    const results = computePPR(drizzleDb, db, ["S"], {
       edgeTypeWeights: { type_alpha: 2.0, type_beta: 0.1 },
       maxIterations: 20,
     });
@@ -303,7 +308,7 @@ describe("computePPR — node specificity dampening", () => {
     insertEdge("SEED", "LEAF", "depends_on");
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"]);
+    const results = computePPR(drizzleDb, db, ["SEED"]);
 
     const scoreHub = results.find((r) => r.nodeId === "HUB")!.score;
     const scoreLeaf = results.find((r) => r.nodeId === "LEAF")!.score;
@@ -323,7 +328,7 @@ describe("computePPR — node specificity dampening", () => {
     insertEdge("SEED", "TARGET", "depends_on");
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"]);
+    const results = computePPR(drizzleDb, db, ["SEED"]);
 
     // TARGET has inDegree=1 (pointed to by SEED), but SEED has inDegree=0.
     // With totalNodes=2, specificity for SEED = log(2/1) > 0.
@@ -347,7 +352,7 @@ describe("computePPR — edge case regression tests", () => {
     // No other nodes, no edges
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"]);
+    const results = computePPR(drizzleDb, db, ["SEED"]);
 
     // Should return exactly one result
     expect(results).toHaveLength(1);
@@ -368,7 +373,7 @@ describe("computePPR — edge case regression tests", () => {
     insertNode("ONLY_NODE");
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["ONLY_NODE"]);
+    const results = computePPR(drizzleDb, db, ["ONLY_NODE"]);
 
     // Score should be positive and finite (not NaN, not Infinity, not 0)
     expect(results[0].score).toBeGreaterThan(0);
@@ -387,7 +392,7 @@ describe("computePPR — edge case regression tests", () => {
     const drizzleDb = drizzle(db, { schema: dbSchema });
 
     // Empty seeds → empty result (documented behavior)
-    const results = computePPR(drizzleDb, []);
+    const results = computePPR(drizzleDb, db, []);
     expect(results).toEqual([]);
     expect(Array.isArray(results)).toBe(true);
   });
@@ -400,7 +405,7 @@ describe("computePPR — edge case regression tests", () => {
     insertEdge("A", "B", "depends_on");
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["A"], { maxNodes: 1 });
+    const results = computePPR(drizzleDb, db, ["A"], { maxNodes: 1 });
 
     // computePPR returns all nodes regardless of maxNodes
     expect(results.length).toBe(2);
@@ -419,7 +424,7 @@ describe("computePPR — edge case regression tests", () => {
     insertEdge("N2", "N3", "depends_on");
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"]);
+    const results = computePPR(drizzleDb, db, ["SEED"]);
 
     // All scores should be finite and non-negative
     for (const r of results) {
@@ -450,7 +455,7 @@ describe("computePPR — edge case regression tests", () => {
     insertEdge("N2", "N3", "depends_on");
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"]);
+    const results = computePPR(drizzleDb, db, ["SEED"]);
 
     // Sum of all scores should be close to 1.0 (before specificity dampening)
     // Note: specificity dampening changes the scale, so we check that
@@ -470,7 +475,7 @@ describe("computePPR — edge case regression tests", () => {
     insertNode("SEED_C");
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED_A", "SEED_B", "SEED_C"]);
+    const results = computePPR(drizzleDb, db, ["SEED_A", "SEED_B", "SEED_C"]);
 
     // All three seeds should be present
     const resultIds = results.map((r) => r.nodeId);
@@ -493,7 +498,7 @@ describe("computePPR — edge case regression tests", () => {
     // No edges inserted
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"]);
+    const results = computePPR(drizzleDb, db, ["SEED"]);
 
     // All nodes should be present since they're in the node set
     expect(results.length).toBeGreaterThanOrEqual(1);
@@ -516,7 +521,7 @@ describe("computePPR — edge case regression tests", () => {
     insertEdge("SEED", "SEED", "depends_on");
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"]);
+    const results = computePPR(drizzleDb, db, ["SEED"]);
 
     expect(results.length).toBe(1);
     expect(results[0].nodeId).toBe("SEED");
@@ -541,10 +546,12 @@ describe("computePPR — stress tests with large graphs", () => {
     }
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["N0"]);
+    const results = computePPR(drizzleDb, db, ["N0"]);
 
-    // All nodes should be present
-    expect(results.length).toBe(nodeCount);
+    // BFS pre-filter: results contain only the BFS-reachable subgraph (MAX_HOPS=4).
+    // For a 500-node linear chain from N0, only ~5 nodes are reachable in 4 hops.
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.length).toBeLessThanOrEqual(nodeCount);
 
     // Seed should be in results with a valid score
     const seedResult = results.find((r) => r.nodeId === "N0");
@@ -565,7 +572,8 @@ describe("computePPR — stress tests with large graphs", () => {
   });
 
   it("handles graph with 500 nodes and star topology", () => {
-    // Create a star: CENTER connected to 499 leaves
+    // Create a star: CENTER connected to 499 leaves.
+    // All leaves are 1 hop from CENTER → BFS subgraph equals full graph.
     const leafCount = 499;
     insertNode("CENTER");
     for (let i = 0; i < leafCount; i++) {
@@ -574,9 +582,9 @@ describe("computePPR — stress tests with large graphs", () => {
     }
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["CENTER"]);
+    const results = computePPR(drizzleDb, db, ["CENTER"]);
 
-    // All nodes should be present
+    // Star topology: all leaves are 1 hop from CENTER → all nodes included.
     expect(results.length).toBe(leafCount + 1);
 
     // Center should be in results
@@ -592,13 +600,14 @@ describe("computePPR — stress tests with large graphs", () => {
   });
 
   it("handles graph with 500 nodes and dense connectivity", () => {
-    // Create a densely connected graph
+    // Create a densely connected graph (each node to next 10 in a ring).
+    // With BFS pre-filter the reachable subgraph is a local neighbourhood.
     const nodeCount = 500;
     for (let i = 0; i < nodeCount; i++) {
       insertNode(`N${i}`);
     }
 
-    // Each node connects to ~10 random other nodes
+    // Each node connects to ~10 sequential other nodes
     for (let i = 0; i < nodeCount; i++) {
       for (let j = 1; j <= 10; j++) {
         const targetIndex = (i + j) % nodeCount;
@@ -607,10 +616,11 @@ describe("computePPR — stress tests with large graphs", () => {
     }
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["N0"]);
+    const results = computePPR(drizzleDb, db, ["N0"]);
 
-    // All nodes should be present
-    expect(results.length).toBe(nodeCount);
+    // BFS subgraph is non-empty; exact count depends on graph topology and MAX_HOPS.
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.length).toBeLessThanOrEqual(nodeCount);
 
     // All scores should be valid
     for (const r of results) {
@@ -625,6 +635,7 @@ describe("computePPR — stress tests with large graphs", () => {
   });
 
   it("handles graph with multiple seeds on large graph", () => {
+    // 300-node chain with 3 spaced seeds — BFS from each covers a local region.
     const nodeCount = 300;
     for (let i = 0; i < nodeCount; i++) {
       insertNode(`N${i}`);
@@ -636,10 +647,11 @@ describe("computePPR — stress tests with large graphs", () => {
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
     const seeds = ["N0", "N100", "N200"];
-    const results = computePPR(drizzleDb, seeds);
+    const results = computePPR(drizzleDb, db, seeds);
 
-    // All nodes should be present
-    expect(results.length).toBe(nodeCount);
+    // BFS subgraph covers union of each seed's neighbourhood; non-empty.
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.length).toBeLessThanOrEqual(nodeCount);
 
     // All seeds should be in results
     for (const seed of seeds) {
@@ -662,14 +674,14 @@ describe("computePPR — stress tests with large graphs", () => {
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
     const startTime = Date.now();
-    const results = computePPR(drizzleDb, ["N0"]);
+    const results = computePPR(drizzleDb, db, ["N0"]);
     const duration = Date.now() - startTime;
 
     // Should complete in reasonable time (< 5 seconds for stress test)
     expect(duration).toBeLessThan(5000);
 
-    // All nodes should be present
-    expect(results.length).toBe(nodeCount);
+    // BFS subgraph is non-empty
+    expect(results.length).toBeGreaterThan(0);
 
     // All scores should be valid
     for (const r of results) {
@@ -686,50 +698,57 @@ describe("computePPR — maxNodes is ignored (pure-slice semantic)", () => {
   // After WI-789: maxNodes is no longer a graph-size abort inside computePPR.
   // The option is kept in PPROptions for backward compatibility but has no
   // effect on computation. LocalAdapter.traverse() applies the slice after
-  // PPR scoring. All tests here assert that computePPR returns full results.
+  // PPR scoring.
+  //
+  // After WI-909: BFS pre-filter limits results to nodes reachable within
+  // MAX_HOPS hops. For tests using long linear chains from N0, only a subset
+  // of nodes will be returned. Tests below use small graphs (≤5 nodes) or
+  // star topologies that are fully reachable within MAX_HOPS hops.
 
-  it("returns all nodes regardless of maxNodes value smaller than graph size", () => {
-    // 10 connected nodes, maxNodes=5 (previously would have aborted)
-    for (let i = 0; i < 10; i++) {
+  it("returns BFS-reachable nodes regardless of maxNodes value", () => {
+    // 5-node chain: all nodes reachable from N0 within 4 hops.
+    for (let i = 0; i < 5; i++) {
       insertNode(`N${i}`);
     }
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < 4; i++) {
       insertEdge(`N${i}`, `N${i + 1}`, "depends_on");
     }
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["N0"], { maxNodes: 5 });
+    const results = computePPR(drizzleDb, db, ["N0"], { maxNodes: 2 });
 
-    // maxNodes is ignored — all 10 nodes are returned
-    expect(results.length).toBe(10);
+    // maxNodes is ignored — BFS subgraph (all 5 nodes within 4 hops) is returned
+    expect(results.length).toBe(5);
   });
 
-  it("returns all nodes when maxNodes equals graph size", () => {
-    for (let i = 0; i < 10; i++) {
+  it("returns BFS-reachable nodes when maxNodes equals graph size", () => {
+    // 5-node chain: all reachable from N0 in 4 hops.
+    for (let i = 0; i < 5; i++) {
       insertNode(`N${i}`);
     }
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < 4; i++) {
       insertEdge(`N${i}`, `N${i + 1}`, "depends_on");
     }
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["N0"], { maxNodes: 10 });
+    const results = computePPR(drizzleDb, db, ["N0"], { maxNodes: 5 });
 
-    expect(results.length).toBe(10);
+    expect(results.length).toBe(5);
   });
 
-  it("returns all nodes when maxNodes exceeds graph size", () => {
-    for (let i = 0; i < 10; i++) {
+  it("returns BFS-reachable nodes when maxNodes exceeds graph size", () => {
+    // 5-node chain: all reachable from N0 in 4 hops.
+    for (let i = 0; i < 5; i++) {
       insertNode(`N${i}`);
     }
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < 4; i++) {
       insertEdge(`N${i}`, `N${i + 1}`, "depends_on");
     }
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["N0"], { maxNodes: 100 });
+    const results = computePPR(drizzleDb, db, ["N0"], { maxNodes: 100 });
 
-    expect(results.length).toBe(10);
+    expect(results.length).toBe(5);
   });
 
   it("returns all nodes when maxNodes=0 (0 means no limit in adapter contract)", () => {
@@ -738,9 +757,9 @@ describe("computePPR — maxNodes is ignored (pure-slice semantic)", () => {
     insertEdge("A", "B", "depends_on");
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["A"], { maxNodes: 0 });
+    const results = computePPR(drizzleDb, db, ["A"], { maxNodes: 0 });
 
-    // computePPR ignores maxNodes entirely — all 2 nodes returned
+    // computePPR ignores maxNodes entirely — all 2 BFS-reachable nodes returned
     expect(results.length).toBe(2);
   });
 
@@ -752,9 +771,9 @@ describe("computePPR — maxNodes is ignored (pure-slice semantic)", () => {
     insertEdge("B", "C", "depends_on");
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["A"], { maxNodes: 1 });
+    const results = computePPR(drizzleDb, db, ["A"], { maxNodes: 1 });
 
-    // All 3 nodes returned regardless of maxNodes
+    // All 3 nodes are within 2 hops of A → BFS returns all 3
     expect(results.length).toBe(3);
   });
 
@@ -762,15 +781,16 @@ describe("computePPR — maxNodes is ignored (pure-slice semantic)", () => {
     insertNode("ONLY");
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["ONLY"], { maxNodes: 1 });
+    const results = computePPR(drizzleDb, db, ["ONLY"], { maxNodes: 1 });
 
     expect(results.length).toBe(1);
     expect(results[0].nodeId).toBe("ONLY");
     expect(results[0].score).toBeGreaterThan(0);
   });
 
-  it("large graph is not affected by small maxNodes", () => {
-    // 100 connected nodes, maxNodes=10 (previously would have aborted)
+  it("large graph with small maxNodes returns BFS-reachable subset", () => {
+    // 100-node linear chain from N0: BFS gives ~5 nodes within 4 hops.
+    // maxNodes is ignored; the count is determined by the BFS radius.
     for (let i = 0; i < 100; i++) {
       insertNode(`N${i}`);
     }
@@ -779,10 +799,11 @@ describe("computePPR — maxNodes is ignored (pure-slice semantic)", () => {
     }
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["N0"], { maxNodes: 10 });
+    const results = computePPR(drizzleDb, db, ["N0"], { maxNodes: 10 });
 
-    // All 100 nodes returned
-    expect(results.length).toBe(100);
+    // BFS subgraph (not all 100) — seed must be present with valid score
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.find((r) => r.nodeId === "N0")).toBeDefined();
   });
 
   it("results are sorted descending regardless of maxNodes", () => {
@@ -794,8 +815,9 @@ describe("computePPR — maxNodes is ignored (pure-slice semantic)", () => {
     }
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["N0"], { maxNodes: 2 });
+    const results = computePPR(drizzleDb, db, ["N0"], { maxNodes: 2 });
 
+    // All 5 nodes are within 4 hops of N0
     expect(results.length).toBe(5);
     for (let i = 1; i < results.length; i++) {
       expect(results[i - 1].score).toBeGreaterThanOrEqual(results[i].score);
@@ -816,7 +838,7 @@ describe("computePPR — high alpha value tests", () => {
     insertEdge("N1", "N2", "depends_on");
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"], { alpha: 0.6 });
+    const results = computePPR(drizzleDb, db, ["SEED"], { alpha: 0.6 });
 
     // Should complete and return valid results
     expect(results.length).toBe(3);
@@ -834,28 +856,28 @@ describe("computePPR — high alpha value tests", () => {
   });
 
   it("handles alpha=0.85 (very high teleport probability)", () => {
-    // Create a longer chain to test propagation with high alpha
-    // Chain: SEED → N1 → N2 → N3 → N4 → N5
+    // Chain: SEED → N1 → N2 → N3 → N4 (4 hops — within MAX_HOPS BFS radius)
+    // N5 is 5 hops away and excluded by BFS pre-filter.
     insertNode("SEED");
-    for (let i = 1; i <= 5; i++) {
+    for (let i = 1; i <= 4; i++) {
       insertNode(`N${i}`);
     }
     // Insert edges after all nodes are created
     insertEdge("SEED", "N1", "depends_on");
-    for (let i = 1; i < 5; i++) {
+    for (let i = 1; i < 4; i++) {
       insertEdge(`N${i}`, `N${i + 1}`, "depends_on");
     }
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"], { alpha: 0.85, maxIterations: 100 });
+    const results = computePPR(drizzleDb, db, ["SEED"], { alpha: 0.85, maxIterations: 100 });
 
-    // Should complete and return results
-    expect(results.length).toBe(6);
+    // Should complete and return results (5 nodes: SEED + N1..N4)
+    expect(results.length).toBe(5);
 
     // With high alpha, scores drop off quickly with distance
     // Seed should have significantly higher score than distant nodes
     const seedScore = results.find((r) => r.nodeId === "SEED")!.score;
-    const distantScore = results.find((r) => r.nodeId === "N5")!.score;
+    const distantScore = results.find((r) => r.nodeId === "N4")!.score;
     expect(seedScore).toBeGreaterThan(distantScore);
 
     // All scores should be valid
@@ -873,7 +895,7 @@ describe("computePPR — high alpha value tests", () => {
     insertEdge("N1", "N2", "depends_on");
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"], { alpha: 0.99, maxIterations: 100 });
+    const results = computePPR(drizzleDb, db, ["SEED"], { alpha: 0.99, maxIterations: 100 });
 
     expect(results.length).toBe(3);
 
@@ -896,7 +918,7 @@ describe("computePPR — high alpha value tests", () => {
     insertEdge("N1", "N2", "depends_on");
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"], { alpha: 0.5 });
+    const results = computePPR(drizzleDb, db, ["SEED"], { alpha: 0.5 });
 
     expect(results.length).toBe(3);
 
@@ -922,7 +944,7 @@ describe("computePPR — high alpha value tests", () => {
     const drizzleDb = drizzle(db, { schema: dbSchema });
 
     // Low alpha (more exploration)
-    const resultsLow = computePPR(drizzleDb, ["A"], { alpha: 0.1, maxIterations: 100 });
+    const resultsLow = computePPR(drizzleDb, db, ["A"], { alpha: 0.1, maxIterations: 100 });
 
     // High alpha (more teleportation)
     // Reset DB between runs
@@ -937,7 +959,7 @@ describe("computePPR — high alpha value tests", () => {
     insertEdge("B", "C", "depends_on");
     insertEdge("C", "A", "depends_on");
 
-    const resultsHigh = computePPR(drizzle(db, { schema: dbSchema }), ["A"], {
+    const resultsHigh = computePPR(drizzle(db, { schema: dbSchema }), db, ["A"], {
       alpha: 0.8,
       maxIterations: 100,
     });
@@ -961,7 +983,7 @@ describe("computePPR — high alpha value tests", () => {
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
     // Very close to 1.0
-    const results = computePPR(drizzleDb, ["SEED"], {
+    const results = computePPR(drizzleDb, db, ["SEED"], {
       alpha: 0.999,
       convergenceThreshold: 1e-10,
       maxIterations: 200,
@@ -992,9 +1014,9 @@ describe("computePPR — concurrent computation tests", () => {
     const drizzleDb = drizzle(db, { schema: dbSchema });
 
     // Multiple sequential calls
-    const results1 = computePPR(drizzleDb, ["A"]);
-    const results2 = computePPR(drizzleDb, ["B"]);
-    const results3 = computePPR(drizzleDb, ["C"]);
+    const results1 = computePPR(drizzleDb, db, ["A"]);
+    const results2 = computePPR(drizzleDb, db, ["B"]);
+    const results3 = computePPR(drizzleDb, db, ["C"]);
 
     // All should return valid results
     expect(results1.length).toBe(3);
@@ -1035,7 +1057,7 @@ describe("computePPR — concurrent computation tests", () => {
     // Call PPR multiple times with same parameters
     const results: { nodeId: string; score: number }[][] = [];
     for (let i = 0; i < 10; i++) {
-      results.push(computePPR(drizzleDb, ["SEED"]));
+      results.push(computePPR(drizzleDb, db, ["SEED"]));
     }
 
     // All results should be identical
@@ -1049,7 +1071,8 @@ describe("computePPR — concurrent computation tests", () => {
   });
 
   it("handles different seeds called in succession", () => {
-    // Create a connected graph
+    // Create a connected graph (10-node chain).
+    // With BFS pre-filter (MAX_HOPS=4), each seed set covers a local subgraph.
     for (let i = 0; i < 10; i++) {
       insertNode(`N${i}`);
     }
@@ -1059,14 +1082,14 @@ describe("computePPR — concurrent computation tests", () => {
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
 
-    // Test different seed combinations
+    // Test different seed combinations — each returns the BFS-reachable subgraph.
     const seeds = [["N0"], ["N5"], ["N9"], ["N0", "N5"], ["N3", "N7", "N9"]];
 
     for (const seedSet of seeds) {
-      const results = computePPR(drizzleDb, seedSet);
+      const results = computePPR(drizzleDb, db, seedSet);
 
-      // Should return results for all nodes
-      expect(results.length).toBe(10);
+      // BFS subgraph is non-empty and contains all seeds
+      expect(results.length).toBeGreaterThan(0);
 
       // All seeds should be in results
       for (const seed of seedSet) {
@@ -1091,9 +1114,9 @@ describe("computePPR — concurrent computation tests", () => {
     const opts2: PPROptions = { alpha: 0.5, maxIterations: 50 };
     const opts3: PPROptions = { alpha: 0.9, maxIterations: 100 };
 
-    const results1 = computePPR(drizzleDb, ["A"], opts1);
-    const results2 = computePPR(drizzleDb, ["A"], opts2);
-    const results3 = computePPR(drizzleDb, ["A"], opts3);
+    const results1 = computePPR(drizzleDb, db, ["A"], opts1);
+    const results2 = computePPR(drizzleDb, db, ["A"], opts2);
+    const results3 = computePPR(drizzleDb, db, ["A"], opts3);
 
     // All should return valid results
     expect(results1.length).toBe(3);
@@ -1114,7 +1137,7 @@ describe("computePPR — concurrent computation tests", () => {
     const drizzleDb = drizzle(db, { schema: dbSchema });
 
     // First call
-    const results1 = computePPR(drizzleDb, ["A"]);
+    const results1 = computePPR(drizzleDb, db, ["A"]);
     expect(results1.length).toBe(2);
 
     // Add new node and edge
@@ -1122,7 +1145,7 @@ describe("computePPR — concurrent computation tests", () => {
     insertEdge("B", "C", "depends_on");
 
     // Second call - should see new node
-    const results2 = computePPR(drizzleDb, ["A"]);
+    const results2 = computePPR(drizzleDb, db, ["A"]);
     expect(results2.length).toBe(3);
     expect(results2.map((r) => r.nodeId)).toContain("C");
   });
@@ -1155,7 +1178,7 @@ describe("computePPR — concurrent computation tests", () => {
     for (let i = 0; i < 5; i++) {
       const testDb = createTestGraph();
       const drizzleDb = drizzle(testDb, { schema: dbSchema });
-      results.push(computePPR(drizzleDb, ["SEED"]));
+      results.push(computePPR(drizzleDb, testDb, ["SEED"]));
       testDb.close();
     }
 
@@ -1179,12 +1202,12 @@ describe("computePPR — concurrent computation tests", () => {
     const drizzleDb = drizzle(db, { schema: dbSchema });
 
     // First call with default weights
-    const results1 = computePPR(drizzleDb, ["SEED"]);
+    const results1 = computePPR(drizzleDb, db, ["SEED"]);
     const scoreHigh1 = results1.find((r) => r.nodeId === "HIGH")!.score;
     const scoreLow1 = results1.find((r) => r.nodeId === "LOW")!.score;
 
     // Second call with inverted weights
-    const results2 = computePPR(drizzleDb, ["SEED"], {
+    const results2 = computePPR(drizzleDb, db, ["SEED"], {
       edgeTypeWeights: { depends_on: 0.4, references: 1.0 },
     });
     const scoreHigh2 = results2.find((r) => r.nodeId === "HIGH")!.score;
@@ -1211,7 +1234,7 @@ describe("computePPR — high alpha stability tests", () => {
     insertEdge("N1", "N2", "depends_on");
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"], { alpha: 0.5 });
+    const results = computePPR(drizzleDb, db, ["SEED"], { alpha: 0.5 });
 
     // All nodes should be present with valid scores
     expect(results.length).toBe(3);
@@ -1237,7 +1260,7 @@ describe("computePPR — high alpha stability tests", () => {
     insertEdge("N2", "N3", "depends_on");
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"], { alpha: 0.7 });
+    const results = computePPR(drizzleDb, db, ["SEED"], { alpha: 0.7 });
 
     // All nodes should be present
     expect(results.length).toBe(4);
@@ -1261,7 +1284,7 @@ describe("computePPR — high alpha stability tests", () => {
     insertEdge("N1", "N2", "depends_on");
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"], { alpha: 0.9 });
+    const results = computePPR(drizzleDb, db, ["SEED"], { alpha: 0.9 });
 
     // All nodes should be present
     expect(results.length).toBe(3);
@@ -1292,7 +1315,7 @@ describe("computePPR — high alpha stability tests", () => {
     // High alpha values should converge quickly
     const alphas = [0.5, 0.7, 0.9];
     for (const alpha of alphas) {
-      const results = computePPR(drizzleDb, ["SEED"], {
+      const results = computePPR(drizzleDb, db, ["SEED"], {
         alpha,
         maxIterations: 20, // Should converge quickly with high alpha
       });
@@ -1310,7 +1333,7 @@ describe("computePPR — high alpha stability tests", () => {
     insertEdge("SEED", "N1", "depends_on");
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"], { alpha: 0.99 });
+    const results = computePPR(drizzleDb, db, ["SEED"], { alpha: 0.99 });
 
     // Should still produce valid results even with extreme alpha
     expect(results.length).toBe(2);
@@ -1341,7 +1364,7 @@ describe("computePPR — sequential computation isolation tests", () => {
     for (let i = 0; i < 5; i++) {
       promises.push(
         Promise.resolve().then(() =>
-          computePPR(drizzleDb, ["ROOT"])
+          computePPR(drizzleDb, db, ["ROOT"])
         )
       );
     }
@@ -1373,7 +1396,7 @@ describe("computePPR — sequential computation isolation tests", () => {
     for (let i = 0; i < 5; i++) {
       promises.push(
         Promise.resolve().then(() =>
-          computePPR(drizzleDb, [`SEED${i}`])
+          computePPR(drizzleDb, db, [`SEED${i}`])
         )
       );
     }
@@ -1401,16 +1424,16 @@ describe("computePPR — sequential computation isolation tests", () => {
     // Run PPR with different options concurrently
     const promises = [
       Promise.resolve().then(() =>
-        computePPR(drizzleDb, ["SEED"], { alpha: 0.15 })
+        computePPR(drizzleDb, db, ["SEED"], { alpha: 0.15 })
       ),
       Promise.resolve().then(() =>
-        computePPR(drizzleDb, ["SEED"], { alpha: 0.5 })
+        computePPR(drizzleDb, db, ["SEED"], { alpha: 0.5 })
       ),
       Promise.resolve().then(() =>
-        computePPR(drizzleDb, ["SEED"], { maxIterations: 50 })
+        computePPR(drizzleDb, db, ["SEED"], { maxIterations: 50 })
       ),
       Promise.resolve().then(() =>
-        computePPR(drizzleDb, ["SEED"], { convergenceThreshold: 1e-8 })
+        computePPR(drizzleDb, db, ["SEED"], { convergenceThreshold: 1e-8 })
       ),
     ];
 
@@ -1437,6 +1460,8 @@ describe("computePPR — sequential computation isolation tests", () => {
 
 describe("computePPR — large graph stress tests (10,000+ nodes)", () => {
   it("handles graph with 2000 nodes efficiently", () => {
+    // 2000-node ring; BFS pre-filter (MAX_HOPS=4) limits the visited set to a
+    // local neighbourhood of N0. PPR runs on that subset only.
     const nodeCount = 2000;
 
     // Create nodes
@@ -1444,7 +1469,7 @@ describe("computePPR — large graph stress tests (10,000+ nodes)", () => {
       insertNode(`N${i}`);
     }
 
-    // Create sparse connections (each node connects to ~2 others)
+    // Create sparse connections (each node connects to ~2 others in a ring)
     for (let i = 0; i < nodeCount; i++) {
       insertEdge(`N${i}`, `N${(i + 1) % nodeCount}`, "depends_on");
       insertEdge(`N${i}`, `N${(i + 2) % nodeCount}`, "references");
@@ -1452,14 +1477,15 @@ describe("computePPR — large graph stress tests (10,000+ nodes)", () => {
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
     const startTime = Date.now();
-    const results = computePPR(drizzleDb, ["N0"]);
+    const results = computePPR(drizzleDb, db, ["N0"]);
     const duration = Date.now() - startTime;
 
     // Should complete in reasonable time for stress test
     expect(duration).toBeLessThan(10000); // 10 seconds
 
-    // All nodes should be present
-    expect(results.length).toBe(nodeCount);
+    // BFS pre-filter: only BFS-reachable subset is returned (not all 2000).
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.length).toBeLessThanOrEqual(nodeCount);
 
     // All scores should be valid
     for (const r of results) {
@@ -1472,28 +1498,29 @@ describe("computePPR — large graph stress tests (10,000+ nodes)", () => {
     }
   });
 
-  it("maxNodes is ignored in computePPR — large graph always returns full results", () => {
-    // After WI-789: maxNodes is no longer an abort threshold inside computePPR.
-    // Large graphs are always fully processed regardless of maxNodes.
+  it("maxNodes is ignored in computePPR — BFS subgraph is returned regardless of maxNodes", () => {
+    // After WI-789: maxNodes has no effect on computePPR.
+    // After WI-909: BFS pre-filter limits the result to the reachable subgraph.
     const nodeCount = 1000;
 
     for (let i = 0; i < nodeCount; i++) {
       insertNode(`N${i}`);
     }
 
-    // Fully connected graph
+    // Ring connectivity
     for (let i = 0; i < nodeCount; i++) {
       insertEdge(`N${i}`, `N${(i + 1) % nodeCount}`, "depends_on");
     }
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
 
-    // All maxNodes values → computePPR always returns all nodes
+    // All maxNodes values → computePPR returns the BFS subgraph (not all nodeCount)
     const maxNodesValues = [100, 500, 1000];
     for (const maxNodes of maxNodesValues) {
-      const results = computePPR(drizzleDb, ["N0"], { maxNodes });
-      // maxNodes is ignored — all nodeCount nodes returned
-      expect(results.length).toBe(nodeCount);
+      const results = computePPR(drizzleDb, db, ["N0"], { maxNodes });
+      // maxNodes is ignored; BFS pre-filter determines the result size
+      expect(results.length).toBeGreaterThan(0);
+      expect(results.find((r) => r.nodeId === "N0")).toBeDefined();
     }
   });
 });
@@ -1506,26 +1533,26 @@ describe("computePPR — parameter validation", () => {
   it("rejects alpha = 0", () => {
     insertNode("SEED");
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    expect(() => computePPR(drizzleDb, ["SEED"], { alpha: 0 })).toThrow(/alpha must be between 0 and 1/);
+    expect(() => computePPR(drizzleDb, db, ["SEED"], { alpha: 0 })).toThrow(/alpha must be between 0 and 1/);
   });
 
   it("rejects negative alpha", () => {
     insertNode("SEED");
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    expect(() => computePPR(drizzleDb, ["SEED"], { alpha: -0.1 })).toThrow(/alpha must be between 0 and 1/);
+    expect(() => computePPR(drizzleDb, db, ["SEED"], { alpha: -0.1 })).toThrow(/alpha must be between 0 and 1/);
   });
 
   it("rejects alpha > 1", () => {
     insertNode("SEED");
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    expect(() => computePPR(drizzleDb, ["SEED"], { alpha: 1.5 })).toThrow(/alpha must be between 0 and 1/);
+    expect(() => computePPR(drizzleDb, db, ["SEED"], { alpha: 1.5 })).toThrow(/alpha must be between 0 and 1/);
   });
 
   it("accepts alpha = 1", () => {
     insertNode("SEED");
     const drizzleDb = drizzle(db, { schema: dbSchema });
     // alpha = 1 should be valid (returns to seed with probability 1)
-    const results = computePPR(drizzleDb, ["SEED"], { alpha: 1 });
+    const results = computePPR(drizzleDb, db, ["SEED"], { alpha: 1 });
     expect(results.length).toBeGreaterThan(0);
   });
 
@@ -1534,51 +1561,51 @@ describe("computePPR — parameter validation", () => {
     insertNode("N1");
     insertEdge("SEED", "N1", "depends_on");
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"], { alpha: 0.15 });
+    const results = computePPR(drizzleDb, db, ["SEED"], { alpha: 0.15 });
     expect(results.length).toBeGreaterThan(0);
   });
 
   it("rejects maxIterations = 0", () => {
     insertNode("SEED");
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    expect(() => computePPR(drizzleDb, ["SEED"], { maxIterations: 0 })).toThrow(/maxIterations must be a positive integer/);
+    expect(() => computePPR(drizzleDb, db, ["SEED"], { maxIterations: 0 })).toThrow(/maxIterations must be a positive integer/);
   });
 
   it("rejects negative maxIterations", () => {
     insertNode("SEED");
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    expect(() => computePPR(drizzleDb, ["SEED"], { maxIterations: -1 })).toThrow(/maxIterations must be a positive integer/);
+    expect(() => computePPR(drizzleDb, db, ["SEED"], { maxIterations: -1 })).toThrow(/maxIterations must be a positive integer/);
   });
 
   it("rejects non-integer maxIterations", () => {
     insertNode("SEED");
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    expect(() => computePPR(drizzleDb, ["SEED"], { maxIterations: 10.5 })).toThrow(/maxIterations must be a positive integer/);
+    expect(() => computePPR(drizzleDb, db, ["SEED"], { maxIterations: 10.5 })).toThrow(/maxIterations must be a positive integer/);
   });
 
   it("accepts valid positive integer maxIterations", () => {
     insertNode("SEED");
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"], { maxIterations: 100 });
+    const results = computePPR(drizzleDb, db, ["SEED"], { maxIterations: 100 });
     expect(results.length).toBeGreaterThan(0);
   });
 
   it("rejects convergenceThreshold = 0", () => {
     insertNode("SEED");
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    expect(() => computePPR(drizzleDb, ["SEED"], { convergenceThreshold: 0 })).toThrow(/convergenceThreshold must be a positive number/);
+    expect(() => computePPR(drizzleDb, db, ["SEED"], { convergenceThreshold: 0 })).toThrow(/convergenceThreshold must be a positive number/);
   });
 
   it("rejects negative convergenceThreshold", () => {
     insertNode("SEED");
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    expect(() => computePPR(drizzleDb, ["SEED"], { convergenceThreshold: -0.001 })).toThrow(/convergenceThreshold must be a positive number/);
+    expect(() => computePPR(drizzleDb, db, ["SEED"], { convergenceThreshold: -0.001 })).toThrow(/convergenceThreshold must be a positive number/);
   });
 
   it("accepts valid positive convergenceThreshold", () => {
     insertNode("SEED");
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"], { convergenceThreshold: 0.00001 });
+    const results = computePPR(drizzleDb, db, ["SEED"], { convergenceThreshold: 0.00001 });
     expect(results.length).toBeGreaterThan(0);
   });
 
@@ -1587,7 +1614,7 @@ describe("computePPR — parameter validation", () => {
     // Negative values are silently accepted and ignored.
     insertNode("SEED");
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"], { maxNodes: -1 });
+    const results = computePPR(drizzleDb, db, ["SEED"], { maxNodes: -1 });
     expect(results.length).toBe(1);
   });
 
@@ -1595,7 +1622,7 @@ describe("computePPR — parameter validation", () => {
     // After WI-789: maxNodes is no longer validated inside computePPR.
     insertNode("SEED");
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"], { maxNodes: 10.5 });
+    const results = computePPR(drizzleDb, db, ["SEED"], { maxNodes: 10.5 });
     expect(results.length).toBe(1);
   });
 
@@ -1604,14 +1631,14 @@ describe("computePPR — parameter validation", () => {
     // The adapter contract uses 0 to mean "no cap" (applied at LocalAdapter slice level).
     insertNode("SEED");
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"], { maxNodes: 0 });
+    const results = computePPR(drizzleDb, db, ["SEED"], { maxNodes: 0 });
     expect(results.length).toBe(1);
   });
 
   it("accepts valid non-negative integer maxNodes", () => {
     insertNode("SEED");
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"], { maxNodes: 1000 });
+    const results = computePPR(drizzleDb, db, ["SEED"], { maxNodes: 1000 });
     expect(results.length).toBeGreaterThan(0);
   });
 
@@ -1619,7 +1646,7 @@ describe("computePPR — parameter validation", () => {
     insertNode("SEED");
     const drizzleDb = drizzle(db, { schema: dbSchema });
     try {
-      computePPR(drizzleDb, ["SEED"], { alpha: -0.5 });
+      computePPR(drizzleDb, db, ["SEED"], { alpha: -0.5 });
       expect(true).toBe(false);
     } catch (err) {
       expect(err).toBeInstanceOf(ValidationError);
@@ -1631,7 +1658,7 @@ describe("computePPR — parameter validation", () => {
     insertNode("SEED");
     const drizzleDb = drizzle(db, { schema: dbSchema });
     try {
-      computePPR(drizzleDb, ["SEED"], { maxIterations: -1 });
+      computePPR(drizzleDb, db, ["SEED"], { maxIterations: -1 });
       expect(true).toBe(false);
     } catch (err) {
       expect(err).toBeInstanceOf(ValidationError);
@@ -1643,7 +1670,7 @@ describe("computePPR — parameter validation", () => {
     insertNode("SEED");
     const drizzleDb = drizzle(db, { schema: dbSchema });
     try {
-      computePPR(drizzleDb, ["SEED"], { convergenceThreshold: -0.001 });
+      computePPR(drizzleDb, db, ["SEED"], { convergenceThreshold: -0.001 });
       expect(true).toBe(false);
     } catch (err) {
       expect(err).toBeInstanceOf(ValidationError);
@@ -1658,7 +1685,7 @@ describe("computePPR — parameter validation", () => {
     insertNode("SEED");
     const drizzleDb = drizzle(db, { schema: dbSchema });
     // Should not throw, and should return the full result
-    const results = computePPR(drizzleDb, ["SEED"], { maxNodes: -1 });
+    const results = computePPR(drizzleDb, db, ["SEED"], { maxNodes: -1 });
     expect(results.length).toBe(1);
     expect(results[0].nodeId).toBe("SEED");
   });
@@ -1691,7 +1718,7 @@ describe("computePPR — CONTAINMENT_EDGE_TYPES exclusion (WI-893 regression)", 
     db.prepare(`INSERT OR REPLACE INTO edges (source_id, target_id, edge_type) VALUES (?, ?, ?)`).run("SEED", "PEER", "depends_on");
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"]);
+    const results = computePPR(drizzleDb, db, ["SEED"]);
 
     const peerResult = results.find((r) => r.nodeId === "PEER");
     const childResult = results.find((r) => r.nodeId === "CHILD");
@@ -1724,7 +1751,7 @@ describe("computePPR — CONTAINMENT_EDGE_TYPES exclusion (WI-893 regression)", 
     }
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"]);
+    const results = computePPR(drizzleDb, db, ["SEED"]);
 
     const peerScore = results.find((r) => r.nodeId === "SEMANTIC_PEER")!.score;
     expect(peerScore).toBeGreaterThan(0);
@@ -1749,7 +1776,7 @@ describe("computePPR — CONTAINMENT_EDGE_TYPES exclusion (WI-893 regression)", 
     db.prepare(`INSERT OR REPLACE INTO edges (source_id, target_id, edge_type) VALUES (?, ?, ?)`).run("SEED", "GOV_TARGET", "governed_by");
 
     const drizzleDb = drizzle(db, { schema: dbSchema });
-    const results = computePPR(drizzleDb, ["SEED"]);
+    const results = computePPR(drizzleDb, db, ["SEED"]);
 
     // Both non-containment targets should appear with positive scores
     const depResult = results.find((r) => r.nodeId === "DEP_TARGET");
@@ -1885,5 +1912,106 @@ describe("LocalContextAdapter.traverse — boundary validation", () => {
       expect(err).toBeInstanceOf(ValidationError);
       expect((err as ValidationError).code).toBe("INVALID_MAX_ITERATIONS");
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test: BFS pre-filter — disconnected subgraph is NOT processed (WI-909)
+// ---------------------------------------------------------------------------
+//
+// The BFS pre-filter collects only nodes reachable from seeds within MAX_HOPS
+// hops (currently 4). Nodes and edges in a completely disconnected component
+// must NOT appear in the PPR result set.
+
+describe("computePPR — BFS pre-filter (WI-909)", () => {
+  it("disconnected component nodes are not included in PPR results", () => {
+    // Connected component A (seeded):
+    //   SEED → A1 → A2
+    //
+    // Disconnected component B (not reachable from SEED):
+    //   B1 → B2 → B3
+    //
+    // With BFS pre-filter, B1/B2/B3 must not appear in the result because they
+    // are not reachable from SEED within MAX_HOPS hops.
+    insertNode("SEED");
+    insertNode("A1");
+    insertNode("A2");
+    insertNode("B1");
+    insertNode("B2");
+    insertNode("B3");
+
+    // Connected component — reachable from SEED
+    insertEdge("SEED", "A1", "depends_on");
+    insertEdge("A1", "A2", "depends_on");
+
+    // Disconnected component — NO path to SEED
+    insertEdge("B1", "B2", "depends_on");
+    insertEdge("B2", "B3", "depends_on");
+
+    const drizzleDb = drizzle(db, { schema: dbSchema });
+    const results = computePPR(drizzleDb, db, ["SEED"]);
+
+    const resultIds = new Set(results.map((r) => r.nodeId));
+
+    // SEED and its reachable nodes must appear
+    expect(resultIds.has("SEED")).toBe(true);
+    expect(resultIds.has("A1")).toBe(true);
+    expect(resultIds.has("A2")).toBe(true);
+
+    // Disconnected component nodes must NOT appear
+    expect(resultIds.has("B1")).toBe(false);
+    expect(resultIds.has("B2")).toBe(false);
+    expect(resultIds.has("B3")).toBe(false);
+  });
+
+  it("all scores remain valid for the connected subgraph", () => {
+    // Same setup as above — verify that scores are positive and sorted.
+    insertNode("SEED");
+    insertNode("A1");
+    insertNode("B1"); // disconnected
+    insertEdge("SEED", "A1", "depends_on");
+    insertEdge("B1", "B1", "depends_on"); // self-loop in disconnected component
+
+    const drizzleDb = drizzle(db, { schema: dbSchema });
+    const results = computePPR(drizzleDb, db, ["SEED"]);
+
+    // Only SEED and A1 should appear
+    expect(results.length).toBe(2);
+
+    for (const r of results) {
+      expect(Number.isFinite(r.score)).toBe(true);
+      expect(r.score).toBeGreaterThanOrEqual(0);
+    }
+
+    // Results sorted descending
+    for (let i = 1; i < results.length; i++) {
+      expect(results[i - 1].score).toBeGreaterThanOrEqual(results[i].score);
+    }
+  });
+
+  it("BFS traverses both forward and reverse edges when building subgraph", () => {
+    // Test that BFS correctly expands in both directions (undirected).
+    // UPSTREAM → SEED and SEED → DOWNSTREAM
+    // Both UPSTREAM and DOWNSTREAM must be in the BFS result since BFS is undirected.
+    insertNode("UPSTREAM");
+    insertNode("SEED");
+    insertNode("DOWNSTREAM");
+    insertNode("ISOLATED");
+
+    insertEdge("UPSTREAM", "SEED", "depends_on"); // reverse direction from seed
+    insertEdge("SEED", "DOWNSTREAM", "depends_on"); // forward direction from seed
+
+    const drizzleDb = drizzle(db, { schema: dbSchema });
+    const results = computePPR(drizzleDb, db, ["SEED"]);
+
+    const resultIds = new Set(results.map((r) => r.nodeId));
+
+    // All three connected nodes must appear
+    expect(resultIds.has("UPSTREAM")).toBe(true);
+    expect(resultIds.has("SEED")).toBe(true);
+    expect(resultIds.has("DOWNSTREAM")).toBe(true);
+
+    // Isolated node must NOT appear
+    expect(resultIds.has("ISOLATED")).toBe(false);
   });
 });

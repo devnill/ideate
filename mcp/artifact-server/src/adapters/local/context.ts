@@ -167,7 +167,7 @@ export class LocalContextAdapter {
     } = options;
 
     // Run PPR algorithm (ppr.ts is an adapter-internal dependency)
-    const pprResults = computePPR(this.drizzleDb, seedNodeIds, {
+    const pprResults = computePPR(this.drizzleDb, this.db, seedNodeIds, {
       alpha,
       maxIterations,
       convergenceThreshold,

@@ -197,6 +197,20 @@ function createMockAdapter(): MockAdapter {
       calls.push({ method: "getToolUsage", args: [filter] });
       return [];
     },
+
+    async checkWorkspace() {
+      calls.push({ method: "checkWorkspace", args: [] });
+      return {
+        timestamp: new Date().toISOString(),
+        summary: { total_checks: 4 as const, passed: 4, failed: 0 },
+        checks: {
+          orphan_nodes: { count: 0, examples: [] },
+          unindexed_yaml: { count: 0, examples: [] },
+          dangling_edges: { count: 0, examples: [] },
+          stale_addressed_by: { count: 0, examples: [] },
+        },
+      };
+    },
   };
 }
 

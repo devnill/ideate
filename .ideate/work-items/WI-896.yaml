@@ -46,9 +46,9 @@ notes: |
 
   ## Self-check
   Walk each of the 5 criteria with satisfied/unsatisfied status.
-resolution: null
-status: pending
+resolution: "indexer.ts refactored: indexSingleFile split into readAndPrepare (fs + parseYaml + computeArtifactHash, no SQL) and upsertPrepared (pure SQL). indexFiles and rebuildIndex both use two-phase pattern: all fs reads in Phase 1 before opening the SQLite transaction in Phase 2. 5 new regression tests. PreparedNode type includes pre-computed interviewEntries for interview-file handling. 1877 tests pass, tsc clean."
+status: done
 cycle_created: 78
-cycle_modified: null
-content_hash: d57a4056fc700064e0858aeb4c40ebb32a0c25b43600adae1a17fff0823bd3a8
-token_count: 626
+cycle_modified: 27
+content_hash: f83638edcc1dab19a34aac9122c656f8428fae4541e74eb9f5a5a279c7692a8a
+token_count: 751

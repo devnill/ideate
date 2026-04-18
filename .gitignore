@@ -43,6 +43,9 @@ scripts/migrate-to-v3.js.map
 .ideate/index.db-wal
 .ideate/index.db-shm
 
+# Ideate migration snapshots (operator-managed retention)
+.ideate/backups/
+
 reports/
 
 # Local worktree scratch (ideate execute skill)

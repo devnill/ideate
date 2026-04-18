@@ -28,6 +28,7 @@ export interface Migration {
   toVersion: number;
   description: string;
   migrate: (ideateDir: string) => void;
+  targeted_yaml?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -187,6 +188,33 @@ export function runPendingMigrations(ideateDir: string): MigrationResult {
     (m) => m.fromVersion >= currentVersion && m.toVersion <= targetVersion
   ).sort((a, b) => a.fromVersion - b.fromVersion);
 
+  // ---------------------------------------------------------------------------
+  // Pre-migration snapshot — taken once before any migration runs
+  // ---------------------------------------------------------------------------
+  const snapshotTimestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const snapshotDir = path.join(ideateDir, "backups", `pre-migrate-${snapshotTimestamp}`);
+  fs.mkdirSync(snapshotDir, { recursive: true });
+
+  // Copy index.db if it exists
+  const dbPath = path.join(ideateDir, "index.db");
+  if (fs.existsSync(dbPath)) {
+    fs.copyFileSync(dbPath, path.join(snapshotDir, "index.db"));
+  }
+
+  // Copy any targeted_yaml files declared by pending migrations
+  for (const migration of pending) {
+    if (migration.targeted_yaml) {
+      for (const yamlRelPath of migration.targeted_yaml) {
+        const srcPath = path.join(ideateDir, yamlRelPath);
+        if (fs.existsSync(srcPath)) {
+          const destPath = path.join(snapshotDir, yamlRelPath);
+          fs.mkdirSync(path.dirname(destPath), { recursive: true });
+          fs.copyFileSync(srcPath, destPath);
+        }
+      }
+    }
+  }
+
   let version = currentVersion;
 
   for (const migration of pending) {
@@ -208,9 +236,9 @@ export function runPendingMigrations(ideateDir: string): MigrationResult {
       writeConfig(ideateDir, updatedConfig);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      log.error("migrations", `Failed: ${migration.description} — ${errMsg}`);
+      log.error("migrations", `Migration failed — snapshot for recovery at: ${snapshotDir} — ${errMsg}`);
       result.errors.push(`v${migration.fromVersion}→v${migration.toVersion}: ${errMsg}`);
-      break; // Stop on first failure
+      throw err; // Propagate to caller; snapshot remains for recovery
     }
   }
 

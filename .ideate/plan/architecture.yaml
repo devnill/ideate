@@ -350,8 +350,8 @@ content: |-
   | `ideate_update_work_items` | Write | tools/write.ts |
   | `ideate_write_artifact` | Write | tools/write.ts |
   | `ideate_emit_event` | Events | tools/events.ts |
-  | `ideate_emit_metric` | Metrics | tools/metrics.ts |
-  | `ideate_get_metrics` | Metrics | tools/metrics.ts |
+  | `ideate_check_workspace` | Diagnostics | tools/diagnostics.ts |
+  | `ideate_get_tool_usage` | Diagnostics | tools/tool-usage.ts |
   | `ideate_get_next_id` | Query | tools/query.ts |
   | `ideate_bootstrap_workspace` | Bootstrap | tools/bootstrap.ts |
   | `ideate_manage_autopilot_state` | Autopilot | tools/autopilot-state.ts |
@@ -614,9 +614,29 @@ content: |-
   | mcp/artifact-server/src/tools/analysis.ts | TypeScript | handleGetConvergenceStatus, handleGetDomainState, handleGetWorkspaceStatus |
   | mcp/artifact-server/src/tools/write.ts | TypeScript | handleAppendJournal, handleArchiveCycle, handleWriteWorkItems, handleUpdateWorkItems, handleWriteArtifact |
   | mcp/artifact-server/src/tools/events.ts | TypeScript | handleEmitEvent |
-  | mcp/artifact-server/src/tools/metrics.ts | TypeScript | handleGetMetrics |
   | mcp/artifact-server/src/index.ts | TypeScript | (MCP server entry point — no public exports) |
   | scripts/migrate-to-v3.ts | TypeScript | MigrationContext, sha256, toYaml, buildArtifact, parsePrinciples, parseYamlFlowArray, parseWorkItemsYaml, migrateJournal, migrateArchiveCycles, extractSection, migratePlanArtifacts, migrateSteeringArtifacts, migrateInterviews, migrateMetrics, MigrationOptions, runMigration |
   | scripts/migrate-to-v3.js | JavaScript | sha256, toYaml, buildArtifact, parsePrinciples, parseYamlFlowArray, parseWorkItemsYaml, migrateJournal, migrateArchiveCycles, extractSection, migratePlanArtifacts, migrateSteeringArtifacts, migrateInterviews, migrateMetrics, runMigration |
-content_hash: e461cf260e8e567f9246649ba730e1d561dd085e08077b633958b18ec9d52f25
-token_count: 8231
+
+  ---
+
+  ## 10. Scale Considerations
+
+  Ideate's current scale targets and known bottlenecks:
+
+  - **PPR memory bound**: computePPR traverses edges seeded from the query. As of WI-909 the implementation uses seed-reachable BFS pre-filter (max_hops: 4 default) to avoid loading the full edges table per call. A log.debug fires per traverse() with the observed edge count so operators can monitor. Above ~10k reachable edges, traversal latency dominates context-assembly time.
+
+  - **SQLite WAL single-writer**: all writes serialize through a single writer; concurrent reads are non-blocking. For batch operations see batchMutate (writer.ts). Long transactions block other writers — PH-053 moved fs I/O out of transaction callbacks to minimize this window.
+
+  - **Token counting accuracy**: estimateTokens uses Math.floor(len/4). Accurate to ±30% for ASCII, ±50% for non-ASCII text. PPR token_budget enforcement is therefore approximate. Precise counting via js-tiktoken exists in instrumentation.ts for metric paths only. See WI-910 for the deferred-upgrade rationale.
+
+  - **ideate_artifact_query page cap**: max 200 results per page. For larger result sets use pagination via offset parameter. Gap-analyst queries should use adapter traverse() rather than pagination-loop queries when possible.
+
+  - **Incremental watcher debounce**: 500ms trailing debounce on artifact directory changes. Rapid-fire writes coalesce into a single index pass.
+
+  - **Index rebuild time**: ~100ms for 100 files, ~1s for 1000 files on typical hardware (M1/M2 Mac, NVMe storage). Full rebuild is O(files); incremental rebuild is O(changed files).
+
+  - **Workspace integrity**: ideate_check_workspace (WI-912) detects orphan nodes, unindexed YAML, dangling edges, and stale addressed_by references. Run as pre-flight for /ideate:review cycles.
+content_hash: 2faad201244670db0277904baa0cee8c05e60b24f0a5cf114ba433053db59b14
+token_count: 8702
+cycle_modified: 27
